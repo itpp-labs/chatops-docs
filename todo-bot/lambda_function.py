@@ -19,7 +19,13 @@ def lambda_handler(event, context):
 
     client = boto3.client('dynamodb')
 
+    # Only work with disabled threaded mode. See https://github.com/eternnoir/pyTelegramBotAPI/issues/161#issuecomment-343873014
+    bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
+
     # PARSE
+    if update.get('callback_query'):
+        return handle_callback(client, bot, update)
+
     message = update.get('message')
     if not message:
         return RESPONSE_200
@@ -28,9 +34,6 @@ def lambda_handler(event, context):
     user = message.get('from')
     if not USERS:
         USERS = {user['id']: user2name(user)}
-
-    # Only work with disabled threaded mode. See https://github.com/eternnoir/pyTelegramBotAPI/issues/161#issuecomment-343873014
-    bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
     command, main_text = get_command_and_text(message.get('text', ''))
 
@@ -67,8 +70,8 @@ def lambda_handler(event, context):
         task_id = int(command[2:])
         result = get_task(client, task_id)
         item = Item().load_from_dict(result['Item'])
-        header = "State: %s" % TASK_STATE_TO_HTML[item.task_state]
-        bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'])
+        header = "<i>State: %s</i>" % TASK_STATE_TO_HTML[item.task_state]
+        bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML')
         for label, array in [(None, item.messages), ("Discussion:", item.replies)]:
             if not array:
                 continue
@@ -93,7 +96,7 @@ def lambda_handler(event, context):
                 TASK_STATE_CANCELED,
             ]
             ])
-        bot.send_message(chat['id'], "TODO: add control buttons here")
+        bot.send_message(chat['id'], "<i>Update state</i>:", reply_markup=buttons, parse_mode='HTML')
         return RESPONSE_200
 
     # REPLY
@@ -113,6 +116,29 @@ def lambda_handler(event, context):
     )
     add_task(client, item.to_dict())
     bot.send_message(chat['id'], "<i>Task created:</i> /t%s" % item.id, reply_to_message_id=message['message_id'], parse_mode='HTML')
+
+    return RESPONSE_200
+
+
+def handle_callback(client, bot, update):
+    callback_query = update.get('callback_query')
+    callback = decode_callback(callback_query.get('data'))
+    message = callback_query.get('message')
+    if not message:
+        return RESPONSE_200
+
+    chat = message.get('chat')
+    # user = message.get('from')
+
+    if callback['action'] == ACTION_UPDATE_TASK_STATE:
+        task_id = callback['task_id']
+        task_state = callback['task_state']
+        update_task_state(client, task_id, task_state)
+        notification = 'New state for /t%s: %s' % (
+            task_id,
+            TASK_STATE_TO_HTML[task_state]
+        )
+        bot.send_message(chat['id'], notification, reply_to_message_id=message['message_id'], parse_mode='HTML')
 
     return RESPONSE_200
 
@@ -212,8 +238,8 @@ def decode_callback(data):
         task_id, task_state = splitted
         return {
             'action': action,
-            'task_id': task_id,
-            'task_state': task_state,
+            'task_id': int(task_id),
+            'task_state': int(task_state),
         }
     return result
 
@@ -250,6 +276,23 @@ def add_task(client, item):
     return client.put_item(
         TableName=DYNAMODB_TABLE,
         Item=item,
+    )
+
+
+def update_task_state(client, task_id, task_state):
+    return _update_task(client, task_id, {
+        'task_state': {
+            'Action': 'PUT',
+            'Value': Item.elem_to_num(task_state)
+        }
+    })
+
+
+def _update_task(client, task_id, AttributeUpdates):
+    return client.update_item(
+        TableName=DYNAMODB_TABLE,
+        Key={'id': Item.elem_to_num(task_id)},
+        AttributeUpdates=AttributeUpdates,
     )
 
 
@@ -320,10 +363,10 @@ class Item(object):
                     for chat_msg in d[ss_param]['SS']
                 ])
 
-        for params, key in [(self.STR_PARAMS, 'S'), (self.INT_PARAMS, 'N')]:
+        for convert, params, key in [(str, self.STR_PARAMS, 'S'), (int, self.INT_PARAMS, 'N')]:
             for p in params:
                 if d.get(p):
-                    setattr(self, p, d[p][key])
+                    setattr(self, p, convert(d[p][key]))
 
         return self
 
