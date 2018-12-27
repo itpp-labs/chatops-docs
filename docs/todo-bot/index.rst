@@ -108,6 +108,10 @@ Environment variables
 * ``DYNAMODB_TABLE_USER`` -- table with users
 * ``LOG_LEVEL`` -- ``DEBUG`` or ``INFO``
 * ``MIN_UPDATE_ID`` -- Number to distract from update_id in task's id computation. Use ``/update_id`` to get value.
+* ``FORWARDING_DELAY`` -- max seconds to wait for next forwarded message. It's a
+  workaround for limitation of telegram API -- it sends forwarded messages one
+  by one and never in a single event.
+
 
 Trigger
 ~~~~~~~

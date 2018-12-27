@@ -17,12 +17,9 @@ def lambda_handler(event, context):
     # See https://core.telegram.org/bots/api#update
     update = telebot.types.JsonDeserializable.check_json(event["body"])
 
-    # Only work with disabled threaded mode. See https://github.com/eternnoir/pyTelegramBotAPI/issues/161#issuecomment-343873014
-    bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
-
     # PARSE
     if update.get('callback_query'):
-        return handle_callback(bot, update)
+        return handle_callback(update)
 
     message = update.get('message')
     if not message:
@@ -35,9 +32,42 @@ def lambda_handler(event, context):
 
     command, main_text = get_command_and_text(message.get('text', ''))
 
-    if not command:
+    if command:
+        return handle_command(update, message, chat, user, command)
+
+    # Empty message
+    if not main_text and not any(message.get(key) for key in MEDIA) and not message.get('photo'):
+        bot.send_message(chat['id'], "<i>Empty message is ignored</i>", reply_to_message_id=message['message_id'], parse_mode='HTML')
+        return RESPONSE_200
+
+    # Check for recent activity
+    user_activity = User.load_by_id(user['id'])
+    if not user_activity:
         pass
-    elif command == '/users':
+    elif user_activity.activity == User.ACTIVITY_FORWARDING:
+        telegram_delta = message.get('date') - user_activity.telegram_unixtime
+        if telegram_delta < FORWARDING_DELAY:
+            # Update previous task instead of creating new one
+            task = Task.load_by_id(user_activity.task_id)
+            task.add_message(message)
+            task.update_messages()
+            return RESPONSE_200
+
+    # Add new task
+    # TODO: support messages without text
+    text = message.get('text')
+    # date = message['date']
+    task_id = message['update_id'] - MIN_UPDATE_ID
+    task = Task(task_id)
+    task.add_message(message)
+    task.description = text
+    task.save()
+    bot.send_message(chat['id'], "<i>Task created:</i> /t%s" % task.id, reply_to_message_id=message['message_id'], parse_mode='HTML')
+    return RESPONSE_200
+
+
+def handle_command(update, message, chat, user, command):
+    if command == '/users':
         # TODO
         bot.send_message(chat['id'], chat['id'], reply_to_message_id=message['message_id'])
         return RESPONSE_200
@@ -94,26 +124,8 @@ def lambda_handler(event, context):
         bot.send_message(chat['id'], "<i>Update state</i>:", reply_markup=buttons, parse_mode='HTML')
         return RESPONSE_200
 
-    # REPLY
-    if not main_text and not any(message.get(key) for key in MEDIA) and not message.get('photo'):
-        bot.send_message(chat['id'], "<i>Empty message is ignored</i>", reply_to_message_id=message['message_id'], parse_mode='HTML')
-        return RESPONSE_200
 
-    # Add new task
-    # TODO: support messages without text
-    text = message.get('text')
-    # date = message['date']
-    task_id = message['update_id'] - MIN_UPDATE_ID
-    task = Task(task_id)
-    task.messages = [(chat['id'], message['message_id'])]
-    task.description = text
-    task.save()
-    bot.send_message(chat['id'], "<i>Task created:</i> /t%s" % task.id, reply_to_message_id=message['message_id'], parse_mode='HTML')
-
-    return RESPONSE_200
-
-
-def handle_callback(bot, update):
+def handle_callback(update):
     callback_query = update.get('callback_query')
     callback = decode_callback(callback_query.get('data'))
     message = callback_query.get('message')
@@ -127,7 +139,7 @@ def handle_callback(bot, update):
         task_id = callback['task_id']
         task_state = callback['task_state']
         task = Task(task_id, task_state)
-        task.save_task_state()
+        task.update_task_state()
         notification = 'New state for /t%s: %s' % (
             task_id,
             TASK_STATE_TO_HTML[task_state]
@@ -152,6 +164,7 @@ DYNAMODB_TABLE_TASK = os.environ.get('DYNAMODB_TABLE_TASK')
 DYNAMODB_TABLE_USER = os.environ.get('DYNAMODB_TABLE_USER')
 LOG_LEVEL = os.environ.get('LOG_LEVEL')
 MIN_UPDATE_ID = int(os.environ.get('MIN_UPDATE_ID', 0))
+FORWARDING_DELAY = int(os.environ.get('FORWARDING_DELAY', 3))
 
 logger = logging.getLogger()
 if LOG_LEVEL:
@@ -159,6 +172,7 @@ if LOG_LEVEL:
 
 
 dynamodb = boto3.client('dynamodb')
+bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
 
 RESPONSE_200 = {
@@ -261,6 +275,8 @@ class DynamodbItem(object):
                 cls.PARTITION_KEY: cls.elem_to_num(id),
             }
         )
+        if not res.get('Item'):
+            return None
         return cls.load_from_dict(res['Item'])
 
     @classmethod
@@ -312,6 +328,7 @@ class DynamodbItem(object):
             Item=self.to_dict(),
         )
 
+
 # DYNAMODB_TABLE_TASK
 # Task structure:
 #
@@ -328,7 +345,8 @@ class User(DynamodbItem):
     INT_PARAMS = ['user_id', 'task_id', 'telegram_unixtime', 'unixtime']
     STR_PARAMS = ['activity']
 
-    ACTIVITY_NEW_TASK = 'new_task'
+    ACTIVITY_NEW_TASK = 'new_task'  # it's used for /new command (TODO)
+    ACTIVITY_FORWARDING = 'forwarding'  # forwarding is started, wait for next forwarded message
 
     def __init__(self, user_id):
         self.user_id = user_id
@@ -365,11 +383,14 @@ class Task(DynamodbItem):
     CHAT_MSG_PARAMS = ['messages', 'replies']
 
     def __init__(self, task_id, task_state=TASK_STATE_TODO):
-        self.replies = []
         self.description = ''
+        self.messages = []
+        self.replies = []
 
     # Preparing
-    # TODO
+    def add_message(self, message):
+        chat = message.get('chat')
+        self.messages.append((chat['id'], message['message_id']))
 
     # Reading
     @classmethod
@@ -422,11 +443,20 @@ class Task(DynamodbItem):
             )
         return res
 
-    def save_task_state(self):
+    def update_task_state(self):
         return self._update({
             'task_state': {
                 'Action': 'PUT',
                 'Value': Task.elem_to_num(self.task_state)
+            }
+        })
+
+    def update_messages(self):
+        d = self.to_dict()
+        return self._update({
+            'messages': {
+                'Action': 'PUT',
+                'Value': d['messages'],
             }
         })
 # EOF
