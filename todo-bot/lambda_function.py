@@ -1,38 +1,10 @@
 import telebot  # https://github.com/eternnoir/pyTelegramBotAPI
+from telebot.types import KeyboardButton, InlineKeyboardButton
 import os
 import logging
 import re
 import boto3
 import json
-
-# Global variabls
-FROM_INDEX = 'from_id-task_state-index'
-TO_INDEX = 'to_id-task_state-index'
-
-# READ environment variables
-BOT_TOKEN = os.environ['BOT_TOKEN']
-USERS = os.environ.get('USERS')
-if USERS:
-    USERS = dict(json.loads(USERS))
-DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE')
-LOG_LEVEL = os.environ.get('LOG_LEVEL')
-MIN_UPDATE_ID = int(os.environ.get('MIN_UPDATE_ID', 0))
-
-logger = logging.getLogger()
-if LOG_LEVEL:
-    logger.setLevel(getattr(logging, LOG_LEVEL))
-
-RESPONSE_200 = {
-    "statusCode": 200,
-    "headers": {},
-    "body": ""
-}
-MEDIA = {'sticker': 'send_sticker', 'voice': 'send_voice', 'video': 'send_video', 'document': 'send_document', 'video_note': 'send_video_note'}
-
-TASK_STATE_TODO = 0
-TASK_STATE_WAITING = 1
-TASK_STATE_DONE = 2
-TASK_STATE_CANCELED = 3
 
 
 def lambda_handler(event, context):
@@ -47,7 +19,13 @@ def lambda_handler(event, context):
 
     client = boto3.client('dynamodb')
 
+    # Only work with disabled threaded mode. See https://github.com/eternnoir/pyTelegramBotAPI/issues/161#issuecomment-343873014
+    bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
+
     # PARSE
+    if update.get('callback_query'):
+        return handle_callback(client, bot, update)
+
     message = update.get('message')
     if not message:
         return RESPONSE_200
@@ -56,9 +34,6 @@ def lambda_handler(event, context):
     user = message.get('from')
     if not USERS:
         USERS = {user['id']: user2name(user)}
-
-    # Only work with disabled threaded mode. See https://github.com/eternnoir/pyTelegramBotAPI/issues/161#issuecomment-343873014
-    bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
     command, main_text = get_command_and_text(message.get('text', ''))
 
@@ -95,10 +70,13 @@ def lambda_handler(event, context):
         task_id = int(command[2:])
         result = get_task(client, task_id)
         item = Item().load_from_dict(result['Item'])
-        for label, array in [("Messages:", item.messages), ("Discussion:", item.replies)]:
+        header = "<i>State: %s</i>" % TASK_STATE_TO_HTML[item.task_state]
+        bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML')
+        for label, array in [(None, item.messages), ("Discussion:", item.replies)]:
             if not array:
                 continue
-            bot.send_message(chat['id'], label, reply_to_message_id=message['message_id'])
+            if label:
+                bot.send_message(chat['id'], label, reply_to_message_id=message['message_id'])
             for from_chat_id, msg_id in item.messages:
                 bot.forward_message(
                     chat['id'],
@@ -106,7 +84,19 @@ def lambda_handler(event, context):
                     message_id=msg_id,
                 )
 
-        bot.send_message(chat['id'], "TODO: add control buttons here")
+        buttons = telebot.types.InlineKeyboardMarkup(row_width=2)
+        buttons.add(
+            *[InlineKeyboardButton(
+                TASK_STATE_TO_HTML[state],
+                callback_data=encode_callback(ACTION_UPDATE_TASK_STATE, task_state=state, task_id=task_id)
+            ) for state in [
+                TASK_STATE_TODO,
+                TASK_STATE_DONE,
+                TASK_STATE_WAITING,
+                TASK_STATE_CANCELED,
+            ]
+            ])
+        bot.send_message(chat['id'], "<i>Update state</i>:", reply_markup=buttons, parse_mode='HTML')
         return RESPONSE_200
 
     # REPLY
@@ -130,6 +120,81 @@ def lambda_handler(event, context):
     return RESPONSE_200
 
 
+def handle_callback(client, bot, update):
+    callback_query = update.get('callback_query')
+    callback = decode_callback(callback_query.get('data'))
+    message = callback_query.get('message')
+    if not message:
+        return RESPONSE_200
+
+    chat = message.get('chat')
+    # user = message.get('from')
+
+    if callback['action'] == ACTION_UPDATE_TASK_STATE:
+        task_id = callback['task_id']
+        task_state = callback['task_state']
+        update_task_state(client, task_id, task_state)
+        notification = 'New state for /t%s: %s' % (
+            task_id,
+            TASK_STATE_TO_HTML[task_state]
+        )
+        bot.send_message(chat['id'], notification, reply_to_message_id=message['message_id'], parse_mode='HTML')
+
+    return RESPONSE_200
+
+
+##########
+# CONSTS #
+###########
+FROM_INDEX = 'from_id-task_state-index'
+TO_INDEX = 'to_id-task_state-index'
+
+# READ environment variables
+BOT_TOKEN = os.environ['BOT_TOKEN']
+USERS = os.environ.get('USERS')
+if USERS:
+    USERS = dict(json.loads(USERS))
+DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE')
+LOG_LEVEL = os.environ.get('LOG_LEVEL')
+MIN_UPDATE_ID = int(os.environ.get('MIN_UPDATE_ID', 0))
+
+logger = logging.getLogger()
+if LOG_LEVEL:
+    logger.setLevel(getattr(logging, LOG_LEVEL))
+
+
+RESPONSE_200 = {
+    "statusCode": 200,
+    "headers": {},
+    "body": ""
+}
+MEDIA = {'sticker': 'send_sticker', 'voice': 'send_voice', 'video': 'send_video', 'document': 'send_document', 'video_note': 'send_video_note'}
+
+TASK_STATE_TODO = 0
+TASK_STATE_WAITING = 1
+TASK_STATE_DONE = 2
+TASK_STATE_CANCELED = 3
+
+# To get emoji code use
+# http://www.webpagefx.com/tools/emoji-cheat-sheet/
+# and https://pypi.python.org/pypi/emoji
+EMOJI_TODO = u'\U0001f4dd'  # emoji.emojize(':memo:', use_aliases=True)
+EMOJI_WAITING = u'\U0001f4a4'  # emoji.emojize(':zzz:', use_aliases=True)
+EMOJI_DONE = u'\u2705'  # emoji.emojize(':white_check_mark:', use_aliases=True)
+EMOJI_CANCELED = u'\u274c'  # emoji.emojize(':x:', use_aliases=True)
+
+
+TASK_STATE_TO_HTML = {
+    TASK_STATE_TODO: " %s ToDo" % EMOJI_TODO,
+    TASK_STATE_WAITING: "%s Waiting" % EMOJI_WAITING,
+    TASK_STATE_DONE: "%s Done" % EMOJI_DONE,
+    TASK_STATE_CANCELED: "%s Canceled" % EMOJI_CANCELED,
+}
+
+
+###########
+# HELPERS #
+###########
 def get_command_and_text(text):
     """split message into command and main text"""
     m = re.match('(/[^ @]*)([^ ]*)(.*)', text, re.DOTALL)
@@ -146,6 +211,37 @@ def user2name(user):
         name += ' ' + user.get('last_name')
 
     return name
+
+
+#############
+# Callbacks #
+#############
+ACTION_UPDATE_TASK_STATE = 'u'
+
+
+def encode_callback(action, task_id=None, task_state=None):
+    if action == ACTION_UPDATE_TASK_STATE:
+        return '%s_%s_%s' % (
+            action,
+            task_id,
+            task_state,
+        )
+
+
+def decode_callback(data):
+    splitted = data.split('_')
+    action = splitted.pop(0)
+    result = {
+        'action': action,
+    }
+    if action == ACTION_UPDATE_TASK_STATE:
+        task_id, task_state = splitted
+        return {
+            'action': action,
+            'task_id': int(task_id),
+            'task_state': int(task_state),
+        }
+    return result
 
 #####################
 # DynamoDB wrappers #
@@ -180,6 +276,23 @@ def add_task(client, item):
     return client.put_item(
         TableName=DYNAMODB_TABLE,
         Item=item,
+    )
+
+
+def update_task_state(client, task_id, task_state):
+    return _update_task(client, task_id, {
+        'task_state': {
+            'Action': 'PUT',
+            'Value': Item.elem_to_num(task_state)
+        }
+    })
+
+
+def _update_task(client, task_id, AttributeUpdates):
+    return client.update_item(
+        TableName=DYNAMODB_TABLE,
+        Key={'id': Item.elem_to_num(task_id)},
+        AttributeUpdates=AttributeUpdates,
     )
 
 
@@ -224,6 +337,8 @@ class Item(object):
     STR_PARAMS = ['description']
     INT_PARAMS = ['id', 'from_id', 'to_id', 'task_state']
 
+    # messages = [(chat_id, msg_id)]
+
     def __init__(self, from_user=None, to_user=None, messages=None, task_state=TASK_STATE_TODO, date=None, update_id=None, description=''):
         self.from_id = from_user and from_user['id']
         self.to_id = to_user and to_user['id']
@@ -243,12 +358,15 @@ class Item(object):
         logger.debug('load_from_dict: %s', d)
         for ss_param in ['messages', 'replies']:
             if d.get(ss_param):
-                setattr(self, ss_param, d[ss_param]['SS'].split('_'))
+                setattr(self, ss_param, [
+                    chat_msg.split('_')
+                    for chat_msg in d[ss_param]['SS']
+                ])
 
-        for params, key in [(self.STR_PARAMS, 'S'), (self.INT_PARAMS, 'N')]:
+        for convert, params, key in [(str, self.STR_PARAMS, 'S'), (int, self.INT_PARAMS, 'N')]:
             for p in params:
                 if d.get(p):
-                    setattr(self, p, d[p][key])
+                    setattr(self, p, convert(d[p][key]))
 
         return self
 
