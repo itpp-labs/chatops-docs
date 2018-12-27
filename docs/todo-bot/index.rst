@@ -61,8 +61,12 @@ To make a `deployment package <https://docs.aws.amazon.com/lambda/latest/dg/lamb
     wget https://gitlab.com/itpp/chatops/raw/master/todo-bot/lambda_function.py -O lambda_function.py
     zip -r /tmp/todo_bot_package.zip *
 
-Create DynamoDB table
+Create DynamoDB tables
 ---------------------
+
+Tasks table
+~~~~~~~~~~~
+It's used to save tasks
 
 * *Partition key:* ``id`` (number)
 * Unmark ``[ ] Use default settings`` checkbox
@@ -81,6 +85,12 @@ Add another Secondary index:
 * *Index name:* ``to_id-task_state-index``
 * *Projected attributes:* ``Include`` -- then add field ``description``
 
+Users table
+~~~~~~~~~~~
+It's used to save current user activity. For example, if user sends batch of forwarded message, we need to change user status to save all messages to a single task.
+
+* *Partition key:* ``user_id`` (number)
+
 Create Lambda function
 ----------------------
 
@@ -94,7 +104,8 @@ Environment variables
 
 * ``BOT_TOKEN`` -- the one you got from BotFather
 * ``USERS`` -- skip if you don't know it. Send command to the bot ``/users`` from the a group with all users. Then set this variable
-* ``DYNAMODB_TABLE`` -- table with tasks
+* ``DYNAMODB_TABLE_TASK`` -- table with tasks
+* ``DYNAMODB_TABLE_USER`` -- table with users
 * ``LOG_LEVEL`` -- ``DEBUG`` or ``INFO``
 * ``MIN_UPDATE_ID`` -- Number to distract from update_id in task's id computation. Use ``/update_id`` to get value.
 
@@ -142,10 +153,7 @@ for dynamodb:
                     "dynamodb:DescribeStream",
                     "dynamodb:Update*"
                 ],
-                "Resource": [
-                 "arn:aws:dynamodb:*:*:table/<TABLE_NAME_HERE>"
-                 "arn:aws:dynamodb:*:*:table/<TABLE_NAME_HERE>/index/*"
-                 ]
+                "Resource": "arn:aws:dynamodb:*:*:table/*"
             }
         ]
     }

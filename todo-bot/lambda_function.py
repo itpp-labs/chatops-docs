@@ -17,14 +17,12 @@ def lambda_handler(event, context):
     # See https://core.telegram.org/bots/api#update
     update = telebot.types.JsonDeserializable.check_json(event["body"])
 
-    client = boto3.client('dynamodb')
-
     # Only work with disabled threaded mode. See https://github.com/eternnoir/pyTelegramBotAPI/issues/161#issuecomment-343873014
     bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
     # PARSE
     if update.get('callback_query'):
-        return handle_callback(client, bot, update)
+        return handle_callback(bot, update)
 
     message = update.get('message')
     if not message:
@@ -48,8 +46,7 @@ def lambda_handler(event, context):
         return RESPONSE_200
     elif command in ['/mytasks', '/tasks_from_me']:
         to_me = command == '/mytasks'
-        result = get_tasks(
-            client,
+        task_list = Task.get_tasks(
             to_me=to_me,
             user_id=user['id'],
             task_state=TASK_STATE_TODO
@@ -59,25 +56,23 @@ def lambda_handler(event, context):
         #     response = "My Tasks:\n\n"
         # else:
         #     response = "Tasks from Me:\n\n"
-        for item_dict in result['Items']:
-            item = Item().load_from_dict(item_dict)
-            response += "/t%s:\n%s\n\n" % (item.id, item.description)
+        for task in task_list:
+            response += "/t%s:\n%s\n\n" % (task.id, task.description)
 
         bot.send_message(chat['id'], response, reply_to_message_id=message['message_id'])
 
         return RESPONSE_200
     elif command.startswith('/t'):
         task_id = int(command[2:])
-        result = get_task(client, task_id)
-        item = Item().load_from_dict(result['Item'])
-        header = "<i>State: %s</i>" % TASK_STATE_TO_HTML[item.task_state]
+        task = Task.load_by_id(task_id)
+        header = "<i>State: %s</i>" % TASK_STATE_TO_HTML[task.task_state]
         bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML')
-        for label, array in [(None, item.messages), ("Discussion:", item.replies)]:
+        for label, array in [(None, task.messages), ("Discussion:", task.replies)]:
             if not array:
                 continue
             if label:
                 bot.send_message(chat['id'], label, reply_to_message_id=message['message_id'])
-            for from_chat_id, msg_id in item.messages:
+            for from_chat_id, msg_id in task.messages:
                 bot.forward_message(
                     chat['id'],
                     from_chat_id=from_chat_id,
@@ -87,9 +82,9 @@ def lambda_handler(event, context):
         buttons = telebot.types.InlineKeyboardMarkup(row_width=2)
         buttons.add(
             *[InlineKeyboardButton(
-                TASK_STATE_TO_HTML[state],
-                callback_data=encode_callback(ACTION_UPDATE_TASK_STATE, task_state=state, task_id=task_id)
-            ) for state in [
+                TASK_STATE_TO_HTML[task_state],
+                callback_data=encode_callback(ACTION_UPDATE_TASK_STATE, task_state=task_state, task_id=task_id)
+            ) for task_state in [
                 TASK_STATE_TODO,
                 TASK_STATE_DONE,
                 TASK_STATE_WAITING,
@@ -107,20 +102,18 @@ def lambda_handler(event, context):
     # Add new task
     # TODO: support messages without text
     text = message.get('text')
-    item = Item(
-        from_user=user,
-        messages=[(chat['id'], message['message_id'])],
-        date=message['date'],
-        update_id=update['update_id'],
-        description=text,
-    )
-    add_task(client, item.to_dict())
-    bot.send_message(chat['id'], "<i>Task created:</i> /t%s" % item.id, reply_to_message_id=message['message_id'], parse_mode='HTML')
+    # date = message['date']
+    task_id = message['update_id'] - MIN_UPDATE_ID
+    task = Task(task_id)
+    task.messages = [(chat['id'], message['message_id'])]
+    task.description = text
+    task.save()
+    bot.send_message(chat['id'], "<i>Task created:</i> /t%s" % task.id, reply_to_message_id=message['message_id'], parse_mode='HTML')
 
     return RESPONSE_200
 
 
-def handle_callback(client, bot, update):
+def handle_callback(bot, update):
     callback_query = update.get('callback_query')
     callback = decode_callback(callback_query.get('data'))
     message = callback_query.get('message')
@@ -133,7 +126,8 @@ def handle_callback(client, bot, update):
     if callback['action'] == ACTION_UPDATE_TASK_STATE:
         task_id = callback['task_id']
         task_state = callback['task_state']
-        update_task_state(client, task_id, task_state)
+        task = Task(task_id, task_state)
+        task.save_task_state()
         notification = 'New state for /t%s: %s' % (
             task_id,
             TASK_STATE_TO_HTML[task_state]
@@ -143,9 +137,9 @@ def handle_callback(client, bot, update):
     return RESPONSE_200
 
 
-##########
-# CONSTS #
-###########
+###############################
+# CONSTS and global variables #
+###############################
 FROM_INDEX = 'from_id-task_state-index'
 TO_INDEX = 'to_id-task_state-index'
 
@@ -154,13 +148,17 @@ BOT_TOKEN = os.environ['BOT_TOKEN']
 USERS = os.environ.get('USERS')
 if USERS:
     USERS = dict(json.loads(USERS))
-DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE')
+DYNAMODB_TABLE_TASK = os.environ.get('DYNAMODB_TABLE_TASK')
+DYNAMODB_TABLE_USER = os.environ.get('DYNAMODB_TABLE_USER')
 LOG_LEVEL = os.environ.get('LOG_LEVEL')
 MIN_UPDATE_ID = int(os.environ.get('MIN_UPDATE_ID', 0))
 
 logger = logging.getLogger()
 if LOG_LEVEL:
     logger.setLevel(getattr(logging, LOG_LEVEL))
+
+
+dynamodb = boto3.client('dynamodb')
 
 
 RESPONSE_200 = {
@@ -247,7 +245,96 @@ def decode_callback(data):
 # DynamoDB wrappers #
 #####################
 
-# Item structure:
+
+class DynamodbItem(object):
+    STR_PARAMS = []
+    INT_PARAMS = []
+    TABLE = 'to-be-updated'
+    PARTITION_KEY = 'id'
+
+    # Reading
+    @classmethod
+    def load_by_id(cls, id):
+        res = dynamodb.get_item(
+            TableName=cls.TABLE,
+            Key={
+                cls.PARTITION_KEY: cls.elem_to_num(id),
+            }
+        )
+        return cls.load_from_dict(res['Item'])
+
+    @classmethod
+    def load_from_dict(cls, d):
+        logger.debug('load_from_dict: %s', d)
+        item = cls()
+        for convert, params, key in [(str, cls.STR_PARAMS, 'S'), (int, cls.INT_PARAMS, 'N')]:
+            for p in params:
+                if d.get(p):
+                    setattr(item, p, convert(d[p][key]))
+
+        return item
+
+    # Writing
+    @staticmethod
+    def elem_to_str(value):
+        return {"S": str(value)}
+
+    @staticmethod
+    def elem_to_num(value):
+        return {"N": str(value)}
+
+    @staticmethod
+    def elem_to_array_of_str(value):
+        return {"SS": [str(v) for v in value]}
+
+    def to_dict(self):
+        res = {}
+        for p in self.STR_PARAMS:
+            res[p] = self.elem_to_str(getattr(self, p))
+
+        for p in self.INT_PARAMS:
+            res[p] = self.elem_to_num(getattr(self, p))
+
+        return res
+
+    def _update(self, AttributeUpdates):
+        return dynamodb.update_item(
+            TableName=self.TABLE,
+            Key={
+                self.PARTITION_KEY: Task.elem_to_num(getattr(self, self.PARTITION_KEY))
+            },
+            AttributeUpdates=AttributeUpdates,
+        )
+
+    def save(self):
+        return dynamodb.put_item(
+            TableName=self.TABLE,
+            Item=self.to_dict(),
+        )
+
+# DYNAMODB_TABLE_TASK
+# Task structure:
+#
+# {
+#   // PRIMARY KEY
+#   "user_id": USER_ID,
+#
+#   "activity": ACTIVITY,
+#   "task_id": TASK_ID,
+#   "telegram_unixtime": UNIXTIME, // date-time according to data from telegram
+#   "unixtime": UNIXTIME, // server date-time
+# }
+class User(DynamodbItem):
+    INT_PARAMS = ['user_id', 'task_id', 'telegram_unixtime', 'unixtime']
+    STR_PARAMS = ['activity']
+
+    ACTIVITY_NEW_TASK = 'new_task'
+
+    def __init__(self, user_id):
+        self.user_id = user_id
+
+# DYNAMODB_TABLE_TASK
+# Task structure:
 #
 # {
 #   // PRIMARY KEY
@@ -272,127 +359,74 @@ def decode_callback(data):
 # }
 
 
-def add_task(client, item):
-    return client.put_item(
-        TableName=DYNAMODB_TABLE,
-        Item=item,
-    )
-
-
-def update_task_state(client, task_id, task_state):
-    return _update_task(client, task_id, {
-        'task_state': {
-            'Action': 'PUT',
-            'Value': Item.elem_to_num(task_state)
-        }
-    })
-
-
-def _update_task(client, task_id, AttributeUpdates):
-    return client.update_item(
-        TableName=DYNAMODB_TABLE,
-        Key={'id': Item.elem_to_num(task_id)},
-        AttributeUpdates=AttributeUpdates,
-    )
-
-
-def get_task(client, id):
-    return client.get_item(
-        TableName=DYNAMODB_TABLE,
-        Key={
-            'id': Item.elem_to_num(id),
-        }
-    )
-
-
-def get_tasks(client, to_me=True, user_id=None, task_state=None):
-    # Doc: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/dynamodb.html#DynamoDB.Client.query
-    args = {
-        ':user_id': Item.elem_to_num(user_id)
-    }
-    if to_me:
-        condition = "to_id = :user_id"
-        index = TO_INDEX
-    else:
-        condition = "from_id = :task_state"
-        index = FROM_INDEX
-
-    if task_state is None:
-        pass
-    else:
-        condition += " and task_state = :task_state"
-        args[':task_state'] = Item.elem_to_num(task_state)
-
-    result = client.query(
-        TableName=DYNAMODB_TABLE,
-        IndexName=index,
-        Select='ALL_PROJECTED_ATTRIBUTES',
-        KeyConditionExpression=condition,
-        ExpressionAttributeValues=args,
-    )
-    return result
-
-
-class Item(object):
+class Task(DynamodbItem):
     STR_PARAMS = ['description']
     INT_PARAMS = ['id', 'from_id', 'to_id', 'task_state']
+    CHAT_MSG_PARAMS = ['messages', 'replies']
 
-    # messages = [(chat_id, msg_id)]
-
-    def __init__(self, from_user=None, to_user=None, messages=None, task_state=TASK_STATE_TODO, date=None, update_id=None, description=''):
-        self.from_id = from_user and from_user['id']
-        self.to_id = to_user and to_user['id']
-        if not self.to_id:
-            self.to_id = self.from_id
-        self.messages = messages
-        self.task_state = task_state
-        self.date = date
-        self.update_id = update_id
-        if update_id:
-            self.id = update_id - MIN_UPDATE_ID
-
+    def __init__(self, task_id, task_state=TASK_STATE_TODO):
         self.replies = []
-        self.description = description
+        self.description = ''
 
-    def load_from_dict(self, d):
-        logger.debug('load_from_dict: %s', d)
-        for ss_param in ['messages', 'replies']:
+    # Preparing
+    # TODO
+
+    # Reading
+    @classmethod
+    def load_from_dict(cls, d):
+        task = super(Task, cls).load_from_dict(d)
+
+        for ss_param in cls.CHAT_MSG_PARAMS:
             if d.get(ss_param):
-                setattr(self, ss_param, [
+                setattr(task, ss_param, [
                     chat_msg.split('_')
                     for chat_msg in d[ss_param]['SS']
                 ])
+        return cls
 
-        for convert, params, key in [(str, self.STR_PARAMS, 'S'), (int, self.INT_PARAMS, 'N')]:
-            for p in params:
-                if d.get(p):
-                    setattr(self, p, convert(d[p][key]))
-
-        return self
-
-    @staticmethod
-    def elem_to_str(value):
-        return {"S": str(value)}
-
-    @staticmethod
-    def elem_to_num(value):
-        return {"N": str(value)}
-
-    @staticmethod
-    def elem_to_array_of_str(value):
-        return {"SS": [str(v) for v in value]}
-
-    def to_dict(self):
-        res = {
-            "messages": self.elem_to_array_of_str(
-                ['%s_%s' % (m[0], m[1]) for m in self.messages]
-            ),
+    @classmethod
+    def get_tasks(cls, to_me=True, user_id=None, task_state=None):
+        # Doc: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/dynamodb.html#DynamoDB.Client.query
+        args = {
+            ':user_id': Task.elem_to_num(user_id)
         }
-        for p in self.STR_PARAMS:
-            res[p] = self.elem_to_str(getattr(self, p))
+        if to_me:
+            condition = "to_id = :user_id"
+            index = TO_INDEX
+        else:
+            condition = "from_id = :task_state"
+            index = FROM_INDEX
 
-        for p in self.INT_PARAMS:
-            res[p] = self.elem_to_num(getattr(self, p))
+        if task_state is None:
+            pass
+        else:
+            condition += " and task_state = :task_state"
+            args[':task_state'] = Task.elem_to_num(task_state)
 
+        result = dynamodb.query(
+            TableName=DYNAMODB_TABLE_TASK,
+            IndexName=index,
+            Select='ALL_PROJECTED_ATTRIBUTES',
+            KeyConditionExpression=condition,
+            ExpressionAttributeValues=args,
+        )
+
+        return (cls.load_from_dict(task_dict) for task_dict in result['Items'])
+
+    # Writing
+    def to_dict(self):
+        res = super(Task, self).to_dict()
+        for ss_param in self.CHAT_MSG_PARAMS:
+            res[ss_param] = self.elem_to_array_of_str(
+                ['%s_%s' % (m[0], m[1]) for m in getattr(self, ss_param)]
+            )
         return res
+
+    def save_task_state(self):
+        return self._update({
+            'task_state': {
+                'Action': 'PUT',
+                'Value': Task.elem_to_num(self.task_state)
+            }
+        })
 # EOF
