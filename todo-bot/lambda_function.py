@@ -7,6 +7,7 @@ import boto3
 import json
 
 # TODO: resend and save discussion about the task (when it's not my tasks)
+# TODO: check that user has rights to update task
 
 
 def lambda_handler(event, context):
@@ -45,7 +46,7 @@ def lambda_handler(event, context):
         return RESPONSE_200
 
     # Check for recent activity
-    user_activity = User.load_by_id(user['id'])
+    user_activity = User.load_by_id(user['id'], chat['id'])
     activity = user_activity and user_activity.activity
     task = None
     if activity and activity != User.ACTIVITY_NONE:
@@ -74,10 +75,21 @@ def lambda_handler(event, context):
     elif user_activity.activity == User.ACTIVITY_ASSIGNING:
         # Update performer
         m = re.match('.* u([0-9]+)$', text)
-        user_id = int(m.group(1))
-        task.assigned_to = user_id
+        new_user_id = int(m.group(1))
+        new_user_name = USERS.get(new_user_id) or 'User%' % new_user_id
+        task.assigned_to = new_user_id
         task.update_assigned_to()
-        reply_text = '<i>Performer is updated for</i> /t%s' % task.id
+        reply_text = '<i>%s is new performer for</i> /t%s' % (new_user_name, task.id)
+        if user['id'] != new_user_id:
+            # notify new user about the task
+            new_user_activity = User.load_by_id(new_user_id, chat['id'])
+            if new_user_activity.chat_id:
+                bot.send_message(
+                    new_user_activity.chat_id,
+                    '<i>You got new task from %s:\n</i>/t%s\n%s' % (user2name(user), task.id, task.description),
+                    parse_mode='HTML'
+                )
+
     else:
         # Just create new task
         # date = message['date']
@@ -116,7 +128,7 @@ def handle_command(update, message, chat, user, command):
         for task in task_list:
             reply_text += "/t%s:\n%s\n\n" % (task.id, task.description)
     else:
-        user_activity = User.load_by_id(user['id'])
+        user_activity = User.load_by_id(user['id'], chat['id'])
 
     if command in ['/stop_attaching', '/cancel']:
         if command == '/stop_attaching':
@@ -450,13 +462,14 @@ class DynamodbItem(object):
 #   // PRIMARY KEY
 #   "user_id": USER_ID,
 #
+#   "chat_id": CHAT_ID,  # user's chat with a bot. It's used to send notifications
 #   "activity": ACTIVITY,
 #   "task_id": TASK_ID,
 #   "telegram_unixtime": UNIXTIME, // date-time according to data from telegram
 #   "unixtime": UNIXTIME, // server date-time
 # }
 class User(DynamodbItem):
-    INT_PARAMS = ['user_id', 'task_id', 'telegram_unixtime', 'unixtime']
+    INT_PARAMS = ['user_id', 'chat_id', 'task_id', 'telegram_unixtime', 'unixtime']
     STR_PARAMS = ['activity']
 
     ACTIVITY_NONE = 'none'  # No activity at the moment
@@ -467,12 +480,26 @@ class User(DynamodbItem):
 
     def __init__(self, user_id):
         self.user_id = user_id
+        self.chat_id = None
 
     def update_activity(self):
         return self.update('activity')
 
     def update_activity_and_task(self):
         return self.update('activity', 'task_id')
+
+    # Reading
+    @classmethod
+    def load_by_id(cls, id, chat_id):
+        res = super(User, cls).load_by_id(id)
+        if chat_id and res.chat_id != chat_id:
+            res.chat_id = chat_id
+            res.update_chat_id()
+        return res
+
+    # Writing
+    def update_chat_id(self):
+        return self.update('chat_id')
 
 # DYNAMODB_TABLE_TASK
 # Task structure:
