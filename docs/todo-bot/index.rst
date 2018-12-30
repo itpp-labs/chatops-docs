@@ -29,6 +29,9 @@ Technical specification
    * Prints replies
    * You can change status from here
 
+* ``/attach123`` -- attach new messages to a task
+* ``/stop_attaching`` -- treat next messages as new task
+
 * ``/users`` -- returns list of users for current chat. It's used to specify list of available users to assign the tasks
 * ``/update_id`` -- current update_id. Can be used to set ``MIN_UPDATE_ID`` (see below)
 
