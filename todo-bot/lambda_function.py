@@ -6,9 +6,6 @@ import re
 import boto3
 import json
 
-# TODO: resend and save discussion about the task (when it's not my tasks)
-# TODO: check that user has rights to update task
-
 
 def lambda_handler(event, context):
     global USERS
@@ -49,8 +46,15 @@ def lambda_handler(event, context):
     user_activity = User.load_by_id(user['id'], chat['id'])
     activity = user_activity and user_activity.activity
     task = None
+    task_from_me = None
+    task_to_me = None
     if activity and activity != User.ACTIVITY_NONE:
         task = Task.load_by_id(user_activity.task_id)
+        task_from_me = user['id'] == task.from_id
+        task_to_me = user['id'] == task.to_id
+        if not (task_from_me or task_to_me):
+            bot.send_message(chat['id'], NOT_FOUND_MESSAGE, parse_mode='HTML')
+            return RESPONSE_200
 
     add_message = False
     reply_text = None
@@ -77,7 +81,7 @@ def lambda_handler(event, context):
         m = re.match('.* u([0-9]+)$', text)
         new_user_id = int(m.group(1))
         new_user_name = USERS.get(new_user_id) or 'User%' % new_user_id
-        task.assigned_to = new_user_id
+        task.to_id = new_user_id
         task.update_assigned_to()
         reply_text = '<i>%s is new performer for</i> /t%s' % (new_user_name, task.id)
         if user['id'] != new_user_id:
@@ -164,19 +168,29 @@ def handle_callback(update):
         return RESPONSE_200
 
     chat = message.get('chat')
-    # user = message.get('from')
+    user = message.get('from')
     reply_text = None
     reply_markup = None
+    user_activity = None
     if action == ACTION_UPDATE_TASK_STATE:
-        task_state = callback['task_state']
-        task = Task(task_id, task_state)
-        task.update_task_state()
-        reply_text = 'New state for /t%s: %s' % (
-            task_id,
-            TASK_STATE_TO_HTML[task_state]
-        )
-    elif action == ACTION_UPDATE_DESCRIPTION:
+        if user['id'] in [task.from_id, task.to_id]:
+            task_state = callback['task_state']
+            task = Task(task_id, task_state)
+            task.update_task_state()
+            reply_text = 'New state for /t%s: %s' % (
+                task_id,
+                TASK_STATE_TO_HTML[task_state]
+            )
+        else:
+            reply_text = NOT_FOUND_MESSAGE
+    else:
+        user_activity = User.load_by_id(user['id'])
+
+    if action == ACTION_UPDATE_DESCRIPTION:
         reply_text = '/t%s: <i>Send new description or click</i> /cancel' % task_id
+        user_activity.activity = User.ACTIVITY_DESCRIPTION_UPDATING
+        user_activity.task_id = task_id
+        user_activity.update_activity_and_task()
     elif action == ACTION_UPDATE_ASSIGNED_TO:
         reply_text = '/t%s: <i>Send new performer or click</i> /cancel' % task_id
         reply_markup = ReplyKeyboardMarkup(row_width=3)
@@ -186,14 +200,22 @@ def handle_callback(update):
                 for user_id, user_name in USERS.items()
             )
         ])
+        user_activity.activity = User.ACTIVITY_ASSIGNING
+        user_activity.task_id = task_id
+        user_activity.update_activity_and_task()
     if reply_text:
         bot.send_message(chat['id'], reply_text, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
 
     return RESPONSE_200
 
 
-def print_task(message, chat, user_activity, task_id):
+def print_task(message, chat, user_activity, task_id, check_rights=True):
     task = Task.load_by_id(task_id)
+    user_id = user_activity.user_id
+    if not user_id or user_id not in [task.from_id, task.to_id]:
+        bot.send_message(chat['id'], NOT_FOUND_MESSAGE, parse_mode='HTML')
+        return False
+
     header = "<i>State: %s</i>" % TASK_STATE_TO_HTML[task.task_state]
     bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML')
     for from_chat_id, msg_id in task.messages:
@@ -235,6 +257,8 @@ def print_task(message, chat, user_activity, task_id):
 ###############################
 # CONSTS and global variables #
 ###############################
+NOT_FOUND_MESSAGE = "<i>Task doesn't exist or you don't have access to it</i>"
+
 FROM_INDEX = 'from_id-task_state-index'
 TO_INDEX = 'to_id-task_state-index'
 
@@ -505,10 +529,10 @@ class User(DynamodbItem):
 #
 #   // SECONDARY KEY (partition)
 #   // index1
-#   "from_id": USER_ID,
+#   "from_id": USER_ID, // assigned by
 #
 #   // index2
-#   "to_id": USER_ID,
+#   "to_id": USER_ID, // assigned to
 #
 #   // SECONDARY KEY (sort)
 #   "task_state": STATE, // STATE: O=TODO, 1=WAITING, 2=DONE, 3=CANCELED
@@ -594,4 +618,7 @@ class Task(DynamodbItem):
 
     def update_description(self):
         return self.update('description')
+
+    def update_assigned_to(self):
+        return self.update('to_id')
 # EOF
