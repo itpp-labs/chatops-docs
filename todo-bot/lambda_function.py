@@ -114,7 +114,22 @@ def handle_command(update, message, chat, user, command):
     user_activity = None
     reply_markup = None
     if command == '/users':
-        reply_text = json.dumps(USERS)
+        # Apparently, there is no way to get list of users
+        pass
+        # members = bot.get_chat_administrators(chat['id'])
+        # logger.debug('get_chat_administrators response: %s', members)
+        # result = {}
+        # for m in members:
+        #     user = m.user
+        #     user_dict = {
+        #         'first_name': user.first_name,
+        #         'last_name': user.last_name,
+        #         'username': user.username,
+        #     }
+        #     result[user['id']] = user2name(user_dict)
+        # reply_text = json.dumps(result)
+    elif command == '/myid':
+        reply_text = json.dumps({user['id']: user2name(user)})
     elif command == '/update_id':
         reply_text = update['update_id']
     elif command in ['/mytasks', '/tasks_from_me']:
@@ -344,7 +359,10 @@ def get_command_and_text(text):
 def user2name(user):
     name = user.get('first_name')
     if user.get('last_name'):
-        name += ' ' + user.get('last_name')
+        name += ' %s' % user.get('last_name')
+
+    if user.get('username'):
+        name += ' (@%s)' % (user.get('username'))
 
     return name
 
@@ -359,12 +377,7 @@ def message2description(message):
             if message.get(key):
                 description = text
                 break
-    name = user['first_name']
-    if user.get('last_name'):
-        name = '%s %s' % (name, user.get('last_name'))
-    elif user.get('username'):
-        name = '%s (@%s)' % (name, user.get('username'))
-    description = ('<a href="tg://user?id=%s">%s</a>: ' % (user['id'], name)) + description
+    description = ('<a href="tg://user?id=%s">%s</a>: ' % (user['id'], user2name(user))) + description
     return description
 
 

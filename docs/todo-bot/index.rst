@@ -31,8 +31,9 @@ Technical specification
 * ``/attach123`` -- attach new messages to a task
 * ``/stop_attaching`` -- treat next messages as new task
 
-* ``/users`` -- returns list of users for current chat. It's used to specify list of available users to assign the tasks
+.. * ``/users`` -- returns list of Administators for current chat. It's used to specify list of available users to assign the tasks. You may need to activate "All Members Are Admins" option to get list of all users.
 * ``/update_id`` -- current update_id. Can be used to set ``MIN_UPDATE_ID`` (see below)
+* ``/myid`` -- Id and Name of current user
 
 To create new task:
 
@@ -101,7 +102,7 @@ Environment variables
 ~~~~~~~~~~~~~~~~~~~~~
 
 * ``BOT_TOKEN`` -- the one you got from BotFather
-* ``USERS`` -- skip if you don't know it. Send command to the bot ``/users`` from the a group with all users. Then set this variable
+* ``USERS`` -- Dictionary of users who can be assigned to a task. Format: ``{USER_ID: USER_NAME}``. At this moment there is no API to get list of members. As a workaround you can ask users to send /myid command to get name and id and prepare the dictionary manually.
 * ``DYNAMODB_TABLE_TASK`` -- table with tasks
 * ``DYNAMODB_TABLE_USER`` -- table with users
 * ``LOG_LEVEL`` -- ``DEBUG`` or ``INFO``
