@@ -168,7 +168,8 @@ def handle_callback(update):
         return RESPONSE_200
 
     chat = message.get('chat')
-    user = message.get('from')
+    # message's "from" is Bot User, not the User who clicked the inline button
+    user = callback_query.get('from')
     reply_text = None
     reply_markup = None
     user_activity = None
@@ -218,7 +219,8 @@ def print_task(message, chat, user_activity, task_id, check_rights=True):
         bot.send_message(chat['id'], NOT_FOUND_MESSAGE, parse_mode='HTML')
         return False
 
-    header = "<i>State: %s</i>" % TASK_STATE_TO_HTML[task.task_state]
+    header = "<i>Task: %s</i>\n" % task.description
+    header += "<i>State: %s</i>" % TASK_STATE_TO_HTML[task.task_state]
     bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML')
     for from_chat_id, msg_id in task.messages:
         bot.forward_message(
@@ -348,11 +350,22 @@ def user2name(user):
 
 
 def message2description(message):
+    user = message.get('from')
+    description = '<i>Task</i>'
     if message.get('text'):
-        return message.get('text')
-    for key, text in MEDIA2DESCRIPTION:
-        if message.get(key):
-            return text
+        description = message.get('text')
+    else:
+        for key, text in MEDIA2DESCRIPTION:
+            if message.get(key):
+                description = text
+                break
+    name = user['first_name']
+    if user.get('last_name'):
+        name = '%s %s' % (name, user.get('last_name'))
+    elif user.get('username'):
+        name = '%s (@%s)' % (name, user.get('username'))
+    description = ('<a href="tg://user?id=%s">%s</a>: ' % (user['id'], name)) + description
+    return description
 
 
 #############
