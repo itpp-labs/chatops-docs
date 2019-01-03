@@ -43,7 +43,7 @@ def lambda_handler(event, context):
         return RESPONSE_200
 
     # Check for recent activity
-    user_activity = User.load_by_id(user['id'], chat['id'])
+    user_activity = User.load_by_id(user['id'], chat)
     activity = user_activity and user_activity.activity
     task = None
     task_from_me = None
@@ -86,7 +86,7 @@ def lambda_handler(event, context):
         reply_text = '<i>%s is new performer for</i> /t%s' % (new_user_name, task.id)
         if user['id'] != new_user_id:
             # notify new user about the task
-            new_user_activity = User.load_by_id(new_user_id, chat['id'])
+            new_user_activity = User.load_by_id(new_user_id, chat)
             if new_user_activity.chat_id:
                 bot.send_message(
                     new_user_activity.chat_id,
@@ -132,7 +132,7 @@ def handle_command(update, message, chat, user, command):
         for task in task_list:
             reply_text += "/t%s:\n%s\n\n" % (task.id, task.description)
     else:
-        user_activity = User.load_by_id(user['id'], chat['id'])
+        user_activity = User.load_by_id(user['id'], chat)
 
     if command in ['/stop_attaching', '/cancel']:
         if command == '/stop_attaching':
@@ -185,7 +185,7 @@ def handle_callback(update):
         else:
             reply_text = NOT_FOUND_MESSAGE
     else:
-        user_activity = User.load_by_id(user['id'])
+        user_activity = User.load_by_id(user['id'], chat)
 
     if action == ACTION_UPDATE_DESCRIPTION:
         reply_text = '/t%s: <i>Send new description or click</i> /cancel' % task_id
@@ -517,9 +517,10 @@ class User(DynamodbItem):
 
     # Reading
     @classmethod
-    def load_by_id(cls, id, chat_id):
+    def load_by_id(cls, id, chat):
         res = super(User, cls).load_by_id(id)
-        if chat_id and res.chat_id != chat_id:
+        chat_id = chat['id']
+        if chat['type'] == 'private' and res.chat_id != chat_id:
             res.chat_id = chat_id
             res.update_chat_id()
         return res
