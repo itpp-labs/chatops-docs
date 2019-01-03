@@ -98,7 +98,7 @@ def lambda_handler(event, context):
         # Just create new task
         # date = message['date']
         task_id = update['update_id'] - MIN_UPDATE_ID
-        task = Task(task_id)
+        task = Task(task_id, user_id=user['id'])
         task.add_message(message)
         task.description = message2description(message)
         task.update()
@@ -214,6 +214,7 @@ def print_task(message, chat, user_activity, task_id, check_rights=True):
     task = Task.load_by_id(task_id)
     user_id = user_activity.user_id
     if not user_id or user_id not in [task.from_id, task.to_id]:
+        logger.info('No access to task %s for user %s, because from_id=%s, to_id=%s', task_id, user_id, task.from_id, task.to_id)
         bot.send_message(chat['id'], NOT_FOUND_MESSAGE, parse_mode='HTML')
         return False
 
@@ -417,7 +418,7 @@ class DynamodbItem(object):
 
     @classmethod
     def load_from_dict(cls, d):
-        logger.debug('load_from_dict: %s', d)
+        logger.debug('%s::load_from_dict: %s', cls, d)
         item = cls()
         for convert, params, key in [(str, cls.STR_PARAMS, 'S'), (int, cls.INT_PARAMS, 'N')]:
             for p in params:
@@ -558,12 +559,12 @@ class Task(DynamodbItem):
     CHAT_MSG_PARAMS = ['messages']
     TABLE = DYNAMODB_TABLE_TASK
 
-    def __init__(self, id=0, task_state=TASK_STATE_TODO):
+    def __init__(self, id=0, task_state=TASK_STATE_TODO, user_id=0):
         self.id = id
         self.task_state = task_state
-        self.from_id = 0
-        self.to_id = 0
-        self.description = ''
+        self.from_id = user_id
+        self.to_id = user_id
+        self.description = '<i>New Task</i>'
         self.messages = []
 
     # Preparing
@@ -582,7 +583,7 @@ class Task(DynamodbItem):
                     chat_msg.split('_')
                     for chat_msg in d[ss_param]['SS']
                 ])
-        return cls
+        return task
 
     @classmethod
     def get_tasks(cls, to_me=True, user_id=None, task_state=None):
