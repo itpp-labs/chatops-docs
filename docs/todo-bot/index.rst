@@ -26,7 +26,6 @@ Technical specification
   * Prints all tasks in a single message with button "Load more Done", "Load more WAITING", "Load more Canceled"
 * ``/t123`` -- shows specific task.
    * Prints original forwarded messages
-   * Prints replies
    * You can change status from here
 
 * ``/attach123`` -- attach new messages to a task
@@ -39,10 +38,6 @@ To create new task:
 
 * Forward message to the bot
 * Assign to a user from the list
-
-To discuss a task:
-
-* Reply to a message from the bot
 
 Deployment
 ==========

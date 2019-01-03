@@ -196,17 +196,12 @@ def print_task(message, chat, user_activity, task_id):
     task = Task.load_by_id(task_id)
     header = "<i>State: %s</i>" % TASK_STATE_TO_HTML[task.task_state]
     bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML')
-    for label, array in [(None, task.messages), ("Discussion:", task.replies)]:
-        if not array:
-            continue
-        if label:
-            bot.send_message(chat['id'], label, reply_to_message_id=message['message_id'])
-        for from_chat_id, msg_id in task.messages:
-            bot.forward_message(
-                chat['id'],
-                from_chat_id=from_chat_id,
-                message_id=msg_id,
-            )
+    for from_chat_id, msg_id in task.messages:
+        bot.forward_message(
+            chat['id'],
+            from_chat_id=from_chat_id,
+            message_id=msg_id,
+        )
 
     buttons = InlineKeyboardMarkup(row_width=2)
     buttons.add(
@@ -522,20 +517,18 @@ class User(DynamodbItem):
 #   "description": "Short representation of the TODO"
 #
 #   // Normal keys
-#   "messages": [CHAT_ID + '_' + MESSAGE_ID], // original messages (forwarded or sent to bot)
-#   "replies": [CHAT_ID + '_' + MESSAGE_ID], // discussions
+#   "messages": [CHAT_ID + '_' + MESSAGE_ID],
 # }
 
 
 class Task(DynamodbItem):
     STR_PARAMS = ['description']
     INT_PARAMS = ['id', 'from_id', 'to_id', 'task_state']
-    CHAT_MSG_PARAMS = ['messages', 'replies']
+    CHAT_MSG_PARAMS = ['messages']
 
     def __init__(self, task_id, task_state=TASK_STATE_TODO):
         self.description = ''
         self.messages = []
-        self.replies = []
 
     # Preparing
     def add_message(self, message):
