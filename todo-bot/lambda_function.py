@@ -97,12 +97,12 @@ def lambda_handler(event, context):
     else:
         # Just create new task
         # date = message['date']
-        task_id = message['update_id'] - MIN_UPDATE_ID
+        task_id = update['update_id'] - MIN_UPDATE_ID
         task = Task(task_id)
         task.add_message(message)
         task.description = message2description(message)
         task.update()
-        reply_text = "<i>Task created:</i> /t%s<i>To attach more information use /attach%s</i>" % (task.id, task.id)
+        reply_text = "<i>Task created:</i> /t%s \n<i>To attach more information use</i> /attach%s" % (task.id, task.id)
 
     if reply_text:
         bot.send_message(chat['id'], reply_text, reply_to_message_id=message['message_id'], parse_mode='HTML')
@@ -173,6 +173,7 @@ def handle_callback(update):
     reply_markup = None
     user_activity = None
     if action == ACTION_UPDATE_TASK_STATE:
+        task = Task.load_by_id(task_id)
         if user['id'] in [task.from_id, task.to_id]:
             task_state = callback['task_state']
             task = Task(task_id, task_state)
@@ -263,7 +264,7 @@ FROM_INDEX = 'from_id-task_state-index'
 TO_INDEX = 'to_id-task_state-index'
 
 # READ environment variables
-BOT_TOKEN = os.environ['BOT_TOKEN']
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
 USERS = os.environ.get('USERS')
 if USERS:
     USERS = dict(json.loads(USERS))
@@ -297,13 +298,10 @@ MEDIA2DESCRIPTION = [
     ('Venue', 'Address'),
     ('location', 'GEO coordinates'),
     ('video_note', 'Video Message'),
-    ('voice', 'Voice Message')
+    ('voice', 'Voice Message'),
     ('document', 'File'),
 ]
 
-
-
-{'sticker': 'Sticker', 'voice': 'Voice Message', 'video': 'Video', 'document': 'File', 'video_note': 'Video Message', 'animation': 'GIF'}
 
 TASK_STATE_TODO = 0
 TASK_STATE_WAITING = 1
@@ -470,7 +468,10 @@ class DynamodbItem(object):
         else:
             AttributeUpdates = {}
             for f in fields:
-                AttributeUpdates[f] = d.get(f)
+                AttributeUpdates[f] = {
+                    'Value': d.get(f),
+                    'Action': 'PUT',
+                }
             return self._update(AttributeUpdates)
 
 
@@ -490,6 +491,8 @@ class DynamodbItem(object):
 class User(DynamodbItem):
     INT_PARAMS = ['user_id', 'chat_id', 'task_id', 'telegram_unixtime', 'unixtime']
     STR_PARAMS = ['activity']
+    TABLE = DYNAMODB_TABLE_USER
+    PARTITION_KEY = 'user_id'
 
     ACTIVITY_NONE = 'none'  # No activity at the moment
     ACTIVITY_NEW_TASK = 'new_task'  # A message or batch of forwarding messages is being sent to the bot
@@ -497,9 +500,13 @@ class User(DynamodbItem):
     ACTIVITY_DESCRIPTION_UPDATING = 'new_description'  # Waiting for new description after using inline button
     ACTIVITY_ASSIGNING = 'new_performer'  # Waiting for new User to todo selected task. Activated by inline button
 
-    def __init__(self, user_id):
+    def __init__(self, user_id=0):
         self.user_id = user_id
-        self.chat_id = None
+        self.activity = self.ACTIVITY_NONE
+        self.chat_id = 0
+        self.task_id = 0
+        self.telegram_unixtime = 0
+        self.unixtime = 0  # it's not used for now
 
     def update_activity(self):
         return self.update('activity')
@@ -549,8 +556,13 @@ class Task(DynamodbItem):
     STR_PARAMS = ['description']
     INT_PARAMS = ['id', 'from_id', 'to_id', 'task_state']
     CHAT_MSG_PARAMS = ['messages']
+    TABLE = DYNAMODB_TABLE_TASK
 
-    def __init__(self, task_id, task_state=TASK_STATE_TODO):
+    def __init__(self, id=0, task_state=TASK_STATE_TODO):
+        self.id = id
+        self.task_state = task_state
+        self.from_id = 0
+        self.to_id = 0
         self.description = ''
         self.messages = []
 
@@ -592,7 +604,7 @@ class Task(DynamodbItem):
             args[':task_state'] = Task.elem_to_num(task_state)
 
         result = dynamodb.query(
-            TableName=DYNAMODB_TABLE_TASK,
+            TableName=cls.TABLE,
             IndexName=index,
             Select='ALL_PROJECTED_ATTRIBUTES',
             KeyConditionExpression=condition,
