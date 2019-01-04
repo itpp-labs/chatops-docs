@@ -58,12 +58,13 @@ def lambda_handler(event, context):
 
     add_message = False
     reply_text = None
+    reply_markup = None
     if user_activity.activity == User.ACTIVITY_NEW_TASK:
         telegram_delta = abs(message.get('date') - user_activity.telegram_unixtime)
         logger.debug('telegram_delta=%s message\'s date: %s', telegram_delta, message.get('date'))
         if telegram_delta < FORWARDING_DELAY:
             add_message = True
-            reply_text = '<i>Message was automatically attached to </i>/t%s' % task.id
+            reply_text = '<i>%s Message was automatically attached to </i>/t%s' % (EMOJI_AUTO_ATTACHED_MESSAGE, task.id)
             if user_activity.telegram_unixtime < message.get('date'):
                 user_activity.telegram_unixtime = message.get('date')
                 user_activity.update_time()
@@ -90,6 +91,7 @@ def lambda_handler(event, context):
         task.to_id = new_user_id
         task.update_assigned_to()
         reply_text = '<i>%s is new performer for</i> /t%s' % (new_user_name, task.id)
+        reply_markup = ReplyKeyboardRemove(),
         if user['id'] != new_user_id:
             # notify new user about the task
             new_user_activity = User.load_by_id(new_user_id)
@@ -97,7 +99,6 @@ def lambda_handler(event, context):
                 bot.send_message(
                     new_user_activity.chat_id,
                     '<i>You got new task from %s:\n</i>/t%s\n%s' % (user2name(user), task.id, task.description),
-                    reply_markup=ReplyKeyboardRemove(),
                     parse_mode='HTML'
                 )
 
@@ -109,14 +110,14 @@ def lambda_handler(event, context):
         task.add_message(message)
         task.description = message2description(message)
         task.update()
-        reply_text = "<i>Task created:</i> /t%s \n<i>To attach more information use</i> /attach%s" % (task.id, task.id)
+        reply_text = "<i>%s Task created:</i> /t%s \n<i>To attach more information use</i> /attach%s" % (EMOJI_NEW_TASK, task.id, task.id)
         user_activity.activity = User.ACTIVITY_NEW_TASK
         user_activity.task_id = task_id
         user_activity.telegram_unixtime = message.get('date')
         user_activity.update_activity_task_time()
 
     if reply_text:
-        bot.send_message(chat['id'], reply_text, reply_to_message_id=message['message_id'], parse_mode='HTML')
+        bot.send_message(chat['id'], reply_text, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
     return RESPONSE_200
 
 
@@ -161,6 +162,9 @@ def handle_command(update, message, chat, user, command):
         #     reply_text = "Tasks from Me:\n\n"
         for task in task_list:
             reply_text += "/t%s:\n%s\n\n" % (task.id, task.description)
+        # task_list is generator
+        if not reply_text:
+            reply_text = "<i>Tasks are not found</i>"
     else:
         user_activity = User.load_by_id(user['id'], chat)
 
@@ -179,7 +183,7 @@ def handle_command(update, message, chat, user, command):
         user_activity.task_id = task_id
         user_activity.update_activity_and_task()
         reply_text = '<i>Send message to attach or click /stop_attaching</i>'
-    elif command.startswith('/t'):
+    elif re.match('/t[0-9]+', command):
         task_id = int(command[2:])
         print_task(message, chat, user_activity, task_id)
         user_activity.activity = User.ACTIVITY_NONE
@@ -212,10 +216,20 @@ def handle_callback(update):
             task_state = callback['task_state']
             task = Task(task_id, task_state)
             task.update_task_state()
-            reply_text = 'New state for /t%s: %s' % (
+            reply_text = 'New state for /t%s: %s\n\n/mytasks' % (
                 task_id,
                 TASK_STATE_TO_HTML[task_state]
             )
+            another_user_id = None
+            if user['id'] != task.from_id:
+                another_user_id = task.from_id
+            elif user['id'] != task.to_id:
+                another_user_id = task.to_id
+
+            if another_user_id:
+                another_user_activity = User.load_by_id(another_user_id)
+                if another_user_activity.chat_id:
+                    bot.send_message(another_user_activity.chat_id, reply_text, parse_mode='HTML', reply_markup=reply_markup)
         else:
             reply_text = NOT_FOUND_MESSAGE
     else:
@@ -358,6 +372,8 @@ EMOJI_DONE = u'\u2705'  # emoji.emojize(':white_check_mark:', use_aliases=True)
 EMOJI_CANCELED = u'\u274c'  # emoji.emojize(':x:', use_aliases=True)
 EMOJI_TASK_TO = u'\u27a1'  # emoji.emojize(':arrow_right:', use_aliases=True)
 EMOJI_TASK_FROM = u'\u2709'  # emoji.emojize(':envelope:', use_aliases=True)
+EMOJI_AUTO_ATTACHED_MESSAGE = u'\U0001f9e9'  # Puzzle. No emoji alias. I got it from message's text
+EMOJI_NEW_TASK = u'\U0001f44d'  # emoji.emojize(':thumbsup:', use_aliases=True)
 
 
 TASK_STATE_TO_HTML = {
@@ -655,11 +671,13 @@ class Task(DynamodbItem):
         args = {
             ':user_id': Task.elem_to_num(user_id)
         }
+        filter_expression = None
         if to_me:
             condition = "to_id = :user_id"
             index = TO_INDEX
         else:
-            condition = "from_id = :task_state"
+            condition = "from_id = :user_id"
+            filter_expression = "to_id <> :user_id"
             index = FROM_INDEX
 
         if task_state is None:
@@ -668,13 +686,17 @@ class Task(DynamodbItem):
             condition += " and task_state = :task_state"
             args[':task_state'] = Task.elem_to_num(task_state)
 
-        result = dynamodb.query(
+        query_kwargs = dict(
             TableName=cls.TABLE,
             IndexName=index,
             Select='ALL_PROJECTED_ATTRIBUTES',
             KeyConditionExpression=condition,
             ExpressionAttributeValues=args,
         )
+        if filter_expression:
+            query_kwargs['FilterExpression'] = filter_expression
+
+        result = dynamodb.query(**query_kwargs)
 
         return (cls.load_from_dict(task_dict) for task_dict in result['Items'])
 

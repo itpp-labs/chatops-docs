@@ -75,14 +75,14 @@ Add Secondary index:
 * *Partition key:* ``from_id`` (number)
 * *Sort key:*  ``task_state`` (number)
 * *Index name:* ``from_id-task_state-index``
-* *Projected attributes:* ``Include`` -- then add field ``description``
+* *Projected attributes:* ``Include`` -- then add field ``description``, ``to_id``
 
 Add another Secondary index:
 
 * *Partition key:* ``to_id`` (number)
 * *Sort key:*  ``task_state`` (number)
 * *Index name:* ``to_id-task_state-index``
-* *Projected attributes:* ``Include`` -- then add field ``description``
+* *Projected attributes:* ``Include`` -- then add field ``description``, ``from_id``
 
 Users table
 ~~~~~~~~~~~
