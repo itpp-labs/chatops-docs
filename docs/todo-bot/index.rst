@@ -26,20 +26,20 @@ Technical specification
   * Prints all tasks in a single message with button "Load more Done", "Load more WAITING", "Load more Canceled"
 * ``/t123`` -- shows specific task.
    * Prints original forwarded messages
-   * Prints replies
    * You can change status from here
 
-* ``/users`` -- returns list of users for current chat. It's used to specify list of available users to assign the tasks
+* ``/attach123`` -- attach new messages to a task
+* ``/stop_attaching`` -- treat next messages as new task
+* ``/assign123`` -- assign a task to another person
+
+.. * ``/users`` -- returns list of Administators for current chat. It's used to specify list of available users to assign the tasks. You may need to activate "All Members Are Admins" option to get list of all users.
 * ``/update_id`` -- current update_id. Can be used to set ``MIN_UPDATE_ID`` (see below)
+* ``/myid`` -- Id and Name of current user
 
 To create new task:
 
 * Forward message to the bot
 * Assign to a user from the list
-
-To discuss a task:
-
-* Reply to a message from the bot
 
 Deployment
 ==========
@@ -61,8 +61,12 @@ To make a `deployment package <https://docs.aws.amazon.com/lambda/latest/dg/lamb
     wget https://gitlab.com/itpp/chatops/raw/master/todo-bot/lambda_function.py -O lambda_function.py
     zip -r /tmp/todo_bot_package.zip *
 
-Create DynamoDB table
+Create DynamoDB tables
 ---------------------
+
+Tasks table
+~~~~~~~~~~~
+It's used to save tasks
 
 * *Partition key:* ``id`` (number)
 * Unmark ``[ ] Use default settings`` checkbox
@@ -72,14 +76,20 @@ Add Secondary index:
 * *Partition key:* ``from_id`` (number)
 * *Sort key:*  ``task_state`` (number)
 * *Index name:* ``from_id-task_state-index``
-* *Projected attributes:* ``Include`` -- then add field ``description``
+* *Projected attributes:* ``Include`` -- then add field ``description``, ``to_id``
 
 Add another Secondary index:
 
 * *Partition key:* ``to_id`` (number)
 * *Sort key:*  ``task_state`` (number)
 * *Index name:* ``to_id-task_state-index``
-* *Projected attributes:* ``Include`` -- then add field ``description``
+* *Projected attributes:* ``Include`` -- then add field ``description``, ``from_id``
+
+Users table
+~~~~~~~~~~~
+It's used to save current user activity. For example, if user sends batch of forwarded message, we need to change user status to save all messages to a single task.
+
+* *Partition key:* ``user_id`` (number)
 
 Create Lambda function
 ----------------------
@@ -93,10 +103,15 @@ Environment variables
 ~~~~~~~~~~~~~~~~~~~~~
 
 * ``BOT_TOKEN`` -- the one you got from BotFather
-* ``USERS`` -- skip if you don't know it. Send command to the bot ``/users`` from the a group with all users. Then set this variable
-* ``DYNAMODB_TABLE`` -- table with tasks
+* ``USERS`` -- Dictionary of users who can be assigned to a task. Format: ``{USER_ID: USER_NAME}``. At this moment there is no API to get list of members. As a workaround you can ask users to send /myid command to get name and id and prepare the dictionary manually.
+* ``DYNAMODB_TABLE_TASK`` -- table with tasks
+* ``DYNAMODB_TABLE_USER`` -- table with users
 * ``LOG_LEVEL`` -- ``DEBUG`` or ``INFO``
 * ``MIN_UPDATE_ID`` -- Number to distract from update_id in task's id computation. Use ``/update_id`` to get value.
+* ``FORWARDING_DELAY`` -- max seconds to wait for next forwarded message. It's a
+  workaround for limitation of telegram API -- it sends forwarded messages one
+  by one and never in a single event. Default is 3 sec.
+
 
 Trigger
 ~~~~~~~
@@ -142,10 +157,7 @@ for dynamodb:
                     "dynamodb:DescribeStream",
                     "dynamodb:Update*"
                 ],
-                "Resource": [
-                 "arn:aws:dynamodb:*:*:table/<TABLE_NAME_HERE>"
-                 "arn:aws:dynamodb:*:*:table/<TABLE_NAME_HERE>/index/*"
-                 ]
+                "Resource": "arn:aws:dynamodb:*:*:table/*"
             }
         ]
     }

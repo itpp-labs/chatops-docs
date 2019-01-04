@@ -1,5 +1,5 @@
 import telebot  # https://github.com/eternnoir/pyTelegramBotAPI
-from telebot.types import KeyboardButton, InlineKeyboardButton
+from telebot.types import KeyboardButton, InlineKeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup, ReplyKeyboardRemove
 import os
 import logging
 import re
@@ -17,14 +17,9 @@ def lambda_handler(event, context):
     # See https://core.telegram.org/bots/api#update
     update = telebot.types.JsonDeserializable.check_json(event["body"])
 
-    client = boto3.client('dynamodb')
-
-    # Only work with disabled threaded mode. See https://github.com/eternnoir/pyTelegramBotAPI/issues/161#issuecomment-343873014
-    bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
-
     # PARSE
     if update.get('callback_query'):
-        return handle_callback(client, bot, update)
+        return handle_callback(update)
 
     message = update.get('message')
     if not message:
@@ -32,135 +27,313 @@ def lambda_handler(event, context):
 
     chat = message.get('chat')
     user = message.get('from')
+    text = message.get('text')
+
     if not USERS:
-        USERS = {user['id']: user2name(user)}
+        USERS = {str(user['id']): user2name(user)}
 
     command, main_text = get_command_and_text(message.get('text', ''))
 
-    if not command:
-        pass
-    elif command == '/users':
-        # TODO
-        bot.send_message(chat['id'], chat['id'], reply_to_message_id=message['message_id'])
-        return RESPONSE_200
-    elif command == '/update_id':
-        bot.send_message(chat['id'], update['update_id'], reply_to_message_id=message['message_id'])
-        return RESPONSE_200
-    elif command in ['/mytasks', '/tasks_from_me']:
-        to_me = command == '/mytasks'
-        result = get_tasks(
-            client,
-            to_me=to_me,
-            user_id=user['id'],
-            task_state=TASK_STATE_TODO
-        )
-        response = ""
-        # if to_me:
-        #     response = "My Tasks:\n\n"
-        # else:
-        #     response = "Tasks from Me:\n\n"
-        for item_dict in result['Items']:
-            item = Item().load_from_dict(item_dict)
-            response += "/t%s:\n%s\n\n" % (item.id, item.description)
+    if command:
+        return handle_command(update, message, chat, user, command)
 
-        bot.send_message(chat['id'], response, reply_to_message_id=message['message_id'])
-
-        return RESPONSE_200
-    elif command.startswith('/t'):
-        task_id = int(command[2:])
-        result = get_task(client, task_id)
-        item = Item().load_from_dict(result['Item'])
-        header = "<i>State: %s</i>" % TASK_STATE_TO_HTML[item.task_state]
-        bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML')
-        for label, array in [(None, item.messages), ("Discussion:", item.replies)]:
-            if not array:
-                continue
-            if label:
-                bot.send_message(chat['id'], label, reply_to_message_id=message['message_id'])
-            for from_chat_id, msg_id in item.messages:
-                bot.forward_message(
-                    chat['id'],
-                    from_chat_id=from_chat_id,
-                    message_id=msg_id,
-                )
-
-        buttons = telebot.types.InlineKeyboardMarkup(row_width=2)
-        buttons.add(
-            *[InlineKeyboardButton(
-                TASK_STATE_TO_HTML[state],
-                callback_data=encode_callback(ACTION_UPDATE_TASK_STATE, task_state=state, task_id=task_id)
-            ) for state in [
-                TASK_STATE_TODO,
-                TASK_STATE_DONE,
-                TASK_STATE_WAITING,
-                TASK_STATE_CANCELED,
-            ]
-            ])
-        bot.send_message(chat['id'], "<i>Update state</i>:", reply_markup=buttons, parse_mode='HTML')
-        return RESPONSE_200
-
-    # REPLY
+    # Empty message
     if not main_text and not any(message.get(key) for key in MEDIA) and not message.get('photo'):
         bot.send_message(chat['id'], "<i>Empty message is ignored</i>", reply_to_message_id=message['message_id'], parse_mode='HTML')
         return RESPONSE_200
 
-    # Add new task
-    # TODO: support messages without text
-    text = message.get('text')
-    item = Item(
-        from_user=user,
-        messages=[(chat['id'], message['message_id'])],
-        date=message['date'],
-        update_id=update['update_id'],
-        description=text,
-    )
-    add_task(client, item.to_dict())
-    bot.send_message(chat['id'], "<i>Task created:</i> /t%s" % item.id, reply_to_message_id=message['message_id'], parse_mode='HTML')
+    # Check for recent activity
+    user_activity = User.load_by_id(user['id'], chat)
+    activity = user_activity and user_activity.activity
+    task = None
+    task_from_me = None
+    task_to_me = None
+    if activity and activity != User.ACTIVITY_NONE:
+        task = Task.load_by_id(user_activity.task_id)
+        task_from_me = user['id'] == task.from_id
+        task_to_me = user['id'] == task.to_id
+        if not (task_from_me or task_to_me):
+            bot.send_message(chat['id'], NOT_FOUND_MESSAGE, parse_mode='HTML')
+            return RESPONSE_200
 
+    add_message = False
+
+    if user_activity.activity == User.ACTIVITY_NEW_TASK:
+        telegram_delta = abs(message.get('date') - user_activity.telegram_unixtime)
+        logger.debug('telegram_delta=%s message\'s date: %s', telegram_delta, message.get('date'))
+        if telegram_delta < FORWARDING_DELAY:
+            add_message = True
+            send(message, chat, '<i>%s Message was automatically attached to </i>/t%s' % (EMOJI_AUTO_ATTACHED_MESSAGE, task.id))
+            if user_activity.telegram_unixtime < message.get('date'):
+                user_activity.telegram_unixtime = message.get('date')
+                user_activity.update_time()
+    elif user_activity.activity == User.ACTIVITY_ATTACHING:
+        add_message = True
+        send(message, chat, '/t%s: <i>new message is attached. Send another message to attach or click</i> /stop_attaching' % task.id)
+
+    if add_message:
+        # Update previous task instead of creating new one
+        task.add_message(message)
+        task.update_messages()
+    elif user_activity.activity == User.ACTIVITY_DESCRIPTION_UPDATING:
+        # Update description
+        send(message, chat, '<i>Description is updated for</i> /t%s' % task.id)
+        task.description = text
+        task.update_description()
+    elif user_activity.activity == User.ACTIVITY_ASSIGNING:
+        # Update performer
+        m = re.match('.* u([0-9]+)$', text)
+        if not m:
+            send(message, chat, '<i>Something went wrong. Try again</i>')
+            user_activity.activity = User.ACTIVITY_NONE
+            user_activity.update_activity()
+            return RESPONSE_200
+        new_user_id = m.group(1)
+        # USERS' keys are strings (because it's json)
+        new_user_name = user_id2name(new_user_id)
+        new_user_id = int(new_user_id)
+
+        reply_text = '<i>%s is new performer for</i> /t%s' % (new_user_name, task.id)
+        reply_markup = ReplyKeyboardRemove()
+        send(message, chat, reply_text, reply_markup)
+
+        task.to_id = new_user_id
+        task.update_assigned_to()
+        if user['id'] != new_user_id:
+            # notify new user about the task
+            new_user_activity = User.load_by_id(new_user_id)
+            if new_user_activity.chat_id:
+                bot.send_message(
+                    new_user_activity.chat_id,
+                    '<i>You got new task from %s:\n</i>/t%s\n%s' % (user2name(user), task.id, task.description),
+                    parse_mode='HTML'
+                )
+
+    else:
+        # Just create new task
+        # date = message['date']
+        task_id = update['update_id'] - MIN_UPDATE_ID
+        send(message, chat, "<i>{emoji} Task created:</i> /t{task_id} \n<i>To attach more information use</i> /attach{task_id}\n\n<i>To assign the task use</i> /assign{task_id}".format(emoji=EMOJI_NEW_TASK, task_id=task_id))
+        task = Task(task_id, user_id=user['id'])
+        task.add_message(message)
+        task.description = message2description(message)
+        task.update()
+        user_activity.activity = User.ACTIVITY_NEW_TASK
+        user_activity.task_id = task_id
+        user_activity.telegram_unixtime = message.get('date')
+        user_activity.update_activity_task_time()
     return RESPONSE_200
 
 
-def handle_callback(client, bot, update):
+def handle_command(update, message, chat, user, command):
+    user_activity = None
+    if command == '/start':
+        send(message, chat, '<i>Send or Forward a message to create new task</i>')
+        # create User record (see User.load_by_id method)
+        user_activity = User.load_by_id(user['id'], chat)
+    elif command == '/users':
+        # Apparently, there is no way to get list of users
+        pass
+        # members = bot.get_chat_administrators(chat['id'])
+        # logger.debug('get_chat_administrators response: %s', members)
+        # result = {}
+        # for m in members:
+        #     user = m.user
+        #     user_dict = {
+        #         'first_name': user.first_name,
+        #         'last_name': user.last_name,
+        #         'username': user.username,
+        #     }
+        #     result[user['id']] = user2name(user_dict)
+        # reply_text = json.dumps(result)
+    elif command == '/myid':
+        send(message, chat, json.dumps({user['id']: user2name(user)}))
+    elif command == '/update_id':
+        send(message, chat, update['update_id'])
+    elif command in ['/mytasks', '/tasks_from_me']:
+        # TODO: make cache for /mytasks
+        to_me = command == '/mytasks'
+        task_list = Task.get_tasks(
+            to_me=to_me,
+            user_id=user['id'],
+            task_state=TASK_STATE_TODO
+        )
+        reply_text = ""
+        for task in task_list:
+            reply_text += "/t%s:\n%s\n\n" % (task.id, task.description)
+        # task_list is generator
+        if reply_text:
+            send(message, chat, reply_text)
+        else:
+            send(message, chat, "<i>Tasks are not found</i>")
+    else:
+        user_activity = User.load_by_id(user['id'], chat)
+
+    if command in ['/stop_attaching', '/cancel']:
+        if command == '/stop_attaching':
+            reply_text = 'Stopped'
+        else:
+            reply_text = 'Canceled'
+        reply_text = '<i>%s. Send a message to create new Task</i>' % reply_text
+        send(message, chat, reply_text, ReplyKeyboardRemove())
+        user_activity.activity = User.ACTIVITY_NONE
+        user_activity.update_activity()
+    elif command.startswith('/attach'):
+        task_id = int(command[len('/attach'):])
+        send(message, chat, '<i>Send message to attach or click /stop_attaching</i>')
+        user_activity.activity = User.ACTIVITY_ATTACHING
+        user_activity.task_id = task_id
+        user_activity.update_activity_and_task()
+    elif command.startswith('/assign'):
+        task_id = int(command[len('/assign'):])
+        reply_markup = assign_keyboard()
+        send(message, chat, '<i>Select new performer or click /cancel</i>', reply_markup)
+        user_activity.activity = User.ACTIVITY_ASSIGNING
+        user_activity.task_id = task_id
+        user_activity.update_activity_and_task()
+    elif re.match('/t[0-9]+', command):
+        task_id = int(command[2:])
+        print_task(message, chat, user_activity, task_id, reply_markup=ReplyKeyboardRemove())
+        user_activity.activity = User.ACTIVITY_NONE
+        user_activity.update_activity()
+    return RESPONSE_200
+
+
+def handle_callback(update):
     callback_query = update.get('callback_query')
     callback = decode_callback(callback_query.get('data'))
+    task_id = callback.get('task_id')
+    action = callback.get('action')
     message = callback_query.get('message')
     if not message:
         return RESPONSE_200
 
     chat = message.get('chat')
-    # user = message.get('from')
 
-    if callback['action'] == ACTION_UPDATE_TASK_STATE:
-        task_id = callback['task_id']
-        task_state = callback['task_state']
-        update_task_state(client, task_id, task_state)
-        notification = 'New state for /t%s: %s' % (
-            task_id,
-            TASK_STATE_TO_HTML[task_state]
-        )
-        bot.send_message(chat['id'], notification, reply_to_message_id=message['message_id'], parse_mode='HTML')
+    # message's "from" is Bot User, not the User who clicked the inline button
+    user = callback_query.get('from')
+    reply_text = None
+    reply_markup = None
+    user_activity = None
+    if action == ACTION_UPDATE_TASK_STATE:
+        task = Task.load_by_id(task_id)
+        if user['id'] in [task.from_id, task.to_id]:
+            task_state = callback['task_state']
+            send(message, chat, 'New state for /t%s: %s\n\n/mytasks' % (
+                task_id,
+                TASK_STATE_TO_HTML[task_state]
+            ))
+            task = Task(task_id, task_state)
+            task.update_task_state()
+            another_user_id = None
+            if user['id'] != task.from_id:
+                another_user_id = task.from_id
+            elif user['id'] != task.to_id:
+                another_user_id = task.to_id
 
+            if another_user_id:
+                another_user_activity = User.load_by_id(another_user_id)
+                if another_user_activity.chat_id:
+                    bot.send_message(another_user_activity.chat_id, reply_text, parse_mode='HTML', reply_markup=reply_markup)
+        else:
+            send(message, chat, NOT_FOUND_MESSAGE)
+    else:
+        user_activity = User.load_by_id(user['id'], chat)
+
+    if action == ACTION_UPDATE_DESCRIPTION:
+        send(message, chat, '/t%s: <i>Send new description or click</i> /cancel' % task_id)
+        user_activity.activity = User.ACTIVITY_DESCRIPTION_UPDATING
+        user_activity.task_id = task_id
+        user_activity.update_activity_and_task()
+    elif action == ACTION_UPDATE_ASSIGNED_TO:
+        reply_markup = assign_keyboard()
+        send(message, chat, '/t%s: <i>Send new performer or click</i> /cancel' % task_id, reply_markup)
+
+        user_activity.activity = User.ACTIVITY_ASSIGNING
+        user_activity.task_id = task_id
+        user_activity.update_activity_and_task()
     return RESPONSE_200
 
 
-##########
-# CONSTS #
-###########
+def print_task(message, chat, user_activity, task_id, check_rights=True, reply_markup=None):
+    task = Task.load_by_id(task_id)
+    user_id = user_activity.user_id
+    if not user_id or user_id not in [task.from_id, task.to_id]:
+        logger.info('No access to task %s for user %s, because from_id=%s, to_id=%s', task_id, user_id, task.from_id, task.to_id)
+        bot.send_message(chat['id'], NOT_FOUND_MESSAGE, parse_mode='HTML', reply_markup=reply_markup)
+        return False
+
+    header = TASK_STATE_TO_HTML[task.task_state]
+    if user_id != task.from_id:
+        header += '\n%s %s' % (EMOJI_TASK_FROM, user_id2name(task.from_id))
+    elif user_id != task.to_id:
+        header += '\n%s %s' % (EMOJI_TASK_TO, user_id2name(task.to_id))
+    header = '<i>%s</i>\n' % header
+    header += task.description
+
+    bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
+    for from_chat_id, msg_id in task.messages:
+        bot.forward_message(
+            chat['id'],
+            from_chat_id=from_chat_id,
+            message_id=msg_id,
+        )
+
+    buttons = InlineKeyboardMarkup(row_width=2)
+    buttons.add(
+        *[InlineKeyboardButton(
+            TASK_STATE_TO_HTML[task_state],
+            callback_data=encode_callback(ACTION_UPDATE_TASK_STATE, task_state=task_state, task_id=task_id)
+        ) for task_state in [
+            TASK_STATE_TODO,
+            TASK_STATE_DONE,
+            TASK_STATE_WAITING,
+            TASK_STATE_CANCELED,
+        ]
+        ])
+    buttons.row_width = 1
+    buttons.add(
+        *[InlineKeyboardButton(
+            text,
+            callback_data=encode_callback(action, task_id=task_id)
+        ) for action, text in [
+            (ACTION_UPDATE_DESCRIPTION, 'Update Description'),
+            (ACTION_UPDATE_ASSIGNED_TO, 'Set Performer'),
+        ]
+        ])
+    bot.send_message(chat['id'], "<i>Use buttons below to update the task </i> /t%s. \n\n<i>To attach new messages use</i> /attach%s" % (task_id, task_id), reply_markup=buttons, parse_mode='HTML')
+
+    # Also, reset activity to avoid confusion
+    user_activity.activity = User.ACTIVITY_NONE
+    user_activity.update_activity()
+
+
+###############################
+# CONSTS and global variables #
+###############################
+NOT_FOUND_MESSAGE = "<i>Task doesn't exist or you don't have access to it</i>"
+
 FROM_INDEX = 'from_id-task_state-index'
 TO_INDEX = 'to_id-task_state-index'
 
 # READ environment variables
-BOT_TOKEN = os.environ['BOT_TOKEN']
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
 USERS = os.environ.get('USERS')
 if USERS:
     USERS = dict(json.loads(USERS))
-DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE')
+DYNAMODB_TABLE_TASK = os.environ.get('DYNAMODB_TABLE_TASK')
+DYNAMODB_TABLE_USER = os.environ.get('DYNAMODB_TABLE_USER')
 LOG_LEVEL = os.environ.get('LOG_LEVEL')
 MIN_UPDATE_ID = int(os.environ.get('MIN_UPDATE_ID', 0))
+FORWARDING_DELAY = int(os.environ.get('FORWARDING_DELAY', 3))
 
 logger = logging.getLogger()
 if LOG_LEVEL:
     logger.setLevel(getattr(logging, LOG_LEVEL))
+
+
+dynamodb = boto3.client('dynamodb')
+bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
 
 RESPONSE_200 = {
@@ -169,6 +342,19 @@ RESPONSE_200 = {
     "body": ""
 }
 MEDIA = {'sticker': 'send_sticker', 'voice': 'send_voice', 'video': 'send_video', 'document': 'send_document', 'video_note': 'send_video_note'}
+MEDIA2DESCRIPTION = [
+    ('photo', 'Photo'),
+    ('sticker', 'Sticker'),
+    ('animation', 'GIF'),
+    ('audio', 'Audio Record'),
+    ('video', 'Video'),
+    ('Venue', 'Address'),
+    ('location', 'GEO coordinates'),
+    ('video_note', 'Video Message'),
+    ('voice', 'Voice Message'),
+    ('document', 'File'),
+]
+
 
 TASK_STATE_TODO = 0
 TASK_STATE_WAITING = 1
@@ -182,6 +368,10 @@ EMOJI_TODO = u'\U0001f4dd'  # emoji.emojize(':memo:', use_aliases=True)
 EMOJI_WAITING = u'\U0001f4a4'  # emoji.emojize(':zzz:', use_aliases=True)
 EMOJI_DONE = u'\u2705'  # emoji.emojize(':white_check_mark:', use_aliases=True)
 EMOJI_CANCELED = u'\u274c'  # emoji.emojize(':x:', use_aliases=True)
+EMOJI_TASK_TO = u'\u27a1'  # emoji.emojize(':arrow_right:', use_aliases=True)
+EMOJI_TASK_FROM = u'\u2709'  # emoji.emojize(':envelope:', use_aliases=True)
+EMOJI_AUTO_ATTACHED_MESSAGE = u'\U0001f9e9'  # Puzzle. No emoji alias. I got it from message's text
+EMOJI_NEW_TASK = u'\U0001f44d'  # emoji.emojize(':thumbsup:', use_aliases=True)
 
 
 TASK_STATE_TO_HTML = {
@@ -190,6 +380,24 @@ TASK_STATE_TO_HTML = {
     TASK_STATE_DONE: "%s Done" % EMOJI_DONE,
     TASK_STATE_CANCELED: "%s Canceled" % EMOJI_CANCELED,
 }
+
+
+#####################
+# Telegram wrappers #
+#####################
+def send(message, chat, reply_text, reply_markup=None):
+    logger.debug('Send message: %s', reply_text)
+    bot.send_message(chat['id'], reply_text, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
+
+
+def assign_keyboard():
+    reply_markup = ReplyKeyboardMarkup(row_width=3)
+    reply_markup.add(
+        *[KeyboardButton(
+            '%s u%s' % (user_name, user_id)
+        ) for user_id, user_name in USERS.items()]
+    )
+    return reply_markup
 
 
 ###########
@@ -208,15 +416,39 @@ def get_command_and_text(text):
 def user2name(user):
     name = user.get('first_name')
     if user.get('last_name'):
-        name += ' ' + user.get('last_name')
+        name += ' %s' % user.get('last_name')
+
+    if user.get('username'):
+        name += ' (@%s)' % (user.get('username'))
 
     return name
+
+
+def user_id2name(user_id):
+    return USERS.get(user_id) or 'User%s' % user_id
+
+
+def message2description(message):
+    user = message.get('from')
+    description = '<i>Task</i>'
+    if message.get('text'):
+        description = message.get('text')
+    else:
+        for key, text in MEDIA2DESCRIPTION:
+            if message.get(key):
+                description = text
+                break
+    user_link = '<a href="tg://user?id=%s">%s</a>' % (user['id'], user2name(user))
+    description = '%s\nby %s' % (description, user_link)
+    return description
 
 
 #############
 # Callbacks #
 #############
-ACTION_UPDATE_TASK_STATE = 'u'
+ACTION_UPDATE_TASK_STATE = 'us'
+ACTION_UPDATE_DESCRIPTION = 'ud'
+ACTION_UPDATE_ASSIGNED_TO = 'ua'
 
 
 def encode_callback(action, task_id=None, task_state=None):
@@ -226,6 +458,11 @@ def encode_callback(action, task_id=None, task_state=None):
             task_id,
             task_state,
         )
+    else:
+        return '%s_%s' % (
+            action,
+            task_id,
+        )
 
 
 def decode_callback(data):
@@ -234,142 +471,51 @@ def decode_callback(data):
     result = {
         'action': action,
     }
+    task_id = splitted.pop(0)
+    result['task_id'] = int(task_id)
     if action == ACTION_UPDATE_TASK_STATE:
-        task_id, task_state = splitted
-        return {
-            'action': action,
-            'task_id': int(task_id),
-            'task_state': int(task_state),
-        }
+        task_state = splitted.pop(0)
+        result['task_state'] = int(task_state)
+
     return result
 
 #####################
 # DynamoDB wrappers #
 #####################
 
-# Item structure:
-#
-# {
-#   // PRIMARY KEY
-#   "id": ID, //= update_id - MIN_UPDATE_ID
-#
-#   // SECONDARY KEY (partition)
-#   // index1
-#   "from_id": USER_ID,
-#
-#   // index2
-#   "to_id": USER_ID,
-#
-#   // SECONDARY KEY (sort)
-#   "task_state": STATE, // STATE: O=TODO, 1=WAITING, 2=DONE, 3=CANCELED
-#
-#   // Projected keys
-#   "description": "Short representation of the TODO"
-#
-#   // Normal keys
-#   "messages": [CHAT_ID + '_' + MESSAGE_ID], // original messages (forwarded or sent to bot)
-#   "replies": [CHAT_ID + '_' + MESSAGE_ID], // discussions
-# }
 
+class DynamodbItem(object):
+    STR_PARAMS = []
+    INT_PARAMS = []
+    TABLE = 'to-be-updated'
+    PARTITION_KEY = 'id'
 
-def add_task(client, item):
-    return client.put_item(
-        TableName=DYNAMODB_TABLE,
-        Item=item,
-    )
+    # Reading
+    @classmethod
+    def load_by_id(cls, id):
+        res = dynamodb.get_item(
+            TableName=cls.TABLE,
+            Key={
+                cls.PARTITION_KEY: cls.elem_to_num(id),
+            }
+        )
+        if not res.get('Item'):
+            # New Item
+            return cls(id)
+        return cls.load_from_dict(res['Item'])
 
-
-def update_task_state(client, task_id, task_state):
-    return _update_task(client, task_id, {
-        'task_state': {
-            'Action': 'PUT',
-            'Value': Item.elem_to_num(task_state)
-        }
-    })
-
-
-def _update_task(client, task_id, AttributeUpdates):
-    return client.update_item(
-        TableName=DYNAMODB_TABLE,
-        Key={'id': Item.elem_to_num(task_id)},
-        AttributeUpdates=AttributeUpdates,
-    )
-
-
-def get_task(client, id):
-    return client.get_item(
-        TableName=DYNAMODB_TABLE,
-        Key={
-            'id': Item.elem_to_num(id),
-        }
-    )
-
-
-def get_tasks(client, to_me=True, user_id=None, task_state=None):
-    # Doc: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/dynamodb.html#DynamoDB.Client.query
-    args = {
-        ':user_id': Item.elem_to_num(user_id)
-    }
-    if to_me:
-        condition = "to_id = :user_id"
-        index = TO_INDEX
-    else:
-        condition = "from_id = :task_state"
-        index = FROM_INDEX
-
-    if task_state is None:
-        pass
-    else:
-        condition += " and task_state = :task_state"
-        args[':task_state'] = Item.elem_to_num(task_state)
-
-    result = client.query(
-        TableName=DYNAMODB_TABLE,
-        IndexName=index,
-        Select='ALL_PROJECTED_ATTRIBUTES',
-        KeyConditionExpression=condition,
-        ExpressionAttributeValues=args,
-    )
-    return result
-
-
-class Item(object):
-    STR_PARAMS = ['description']
-    INT_PARAMS = ['id', 'from_id', 'to_id', 'task_state']
-
-    # messages = [(chat_id, msg_id)]
-
-    def __init__(self, from_user=None, to_user=None, messages=None, task_state=TASK_STATE_TODO, date=None, update_id=None, description=''):
-        self.from_id = from_user and from_user['id']
-        self.to_id = to_user and to_user['id']
-        if not self.to_id:
-            self.to_id = self.from_id
-        self.messages = messages
-        self.task_state = task_state
-        self.date = date
-        self.update_id = update_id
-        if update_id:
-            self.id = update_id - MIN_UPDATE_ID
-
-        self.replies = []
-        self.description = description
-
-    def load_from_dict(self, d):
-        logger.debug('load_from_dict: %s', d)
-        for ss_param in ['messages', 'replies']:
-            if d.get(ss_param):
-                setattr(self, ss_param, [
-                    chat_msg.split('_')
-                    for chat_msg in d[ss_param]['SS']
-                ])
-
-        for convert, params, key in [(str, self.STR_PARAMS, 'S'), (int, self.INT_PARAMS, 'N')]:
+    @classmethod
+    def load_from_dict(cls, d):
+        logger.debug('%s::load_from_dict: %s', cls, d)
+        item = cls()
+        for convert, params, key in [(str, cls.STR_PARAMS, 'S'), (int, cls.INT_PARAMS, 'N')]:
             for p in params:
                 if d.get(p):
-                    setattr(self, p, convert(d[p][key]))
+                    setattr(item, p, convert(d[p][key]))
 
-        return self
+        return item
 
+    # Writing
     @staticmethod
     def elem_to_str(value):
         return {"S": str(value)}
@@ -383,11 +529,7 @@ class Item(object):
         return {"SS": [str(v) for v in value]}
 
     def to_dict(self):
-        res = {
-            "messages": self.elem_to_array_of_str(
-                ['%s_%s' % (m[0], m[1]) for m in self.messages]
-            ),
-        }
+        res = {}
         for p in self.STR_PARAMS:
             res[p] = self.elem_to_str(getattr(self, p))
 
@@ -395,4 +537,203 @@ class Item(object):
             res[p] = self.elem_to_num(getattr(self, p))
 
         return res
+
+    def _update(self, AttributeUpdates):
+        return dynamodb.update_item(
+            TableName=self.TABLE,
+            Key={
+                self.PARTITION_KEY: Task.elem_to_num(getattr(self, self.PARTITION_KEY))
+            },
+            AttributeUpdates=AttributeUpdates,
+        )
+
+    def update(self, *fields):
+        d = self.to_dict()
+        if not fields:
+            return dynamodb.put_item(
+                TableName=self.TABLE,
+                Item=d,
+            )
+        else:
+            AttributeUpdates = {}
+            for f in fields:
+                AttributeUpdates[f] = {
+                    'Value': d.get(f),
+                    'Action': 'PUT',
+                }
+            return self._update(AttributeUpdates)
+
+
+# DYNAMODB_TABLE_TASK
+# Task structure:
+#
+# {
+#   // PRIMARY KEY
+#   "user_id": USER_ID,
+#
+#   "chat_id": CHAT_ID,  # user's chat with a bot. It's used to send notifications
+#   "activity": ACTIVITY,
+#   "task_id": TASK_ID,
+#   "telegram_unixtime": UNIXTIME, // date-time according to data from telegram
+#   "unixtime": UNIXTIME, // server date-time
+# }
+class User(DynamodbItem):
+    INT_PARAMS = ['user_id', 'chat_id', 'task_id', 'telegram_unixtime', 'unixtime']
+    STR_PARAMS = ['activity']
+    TABLE = DYNAMODB_TABLE_USER
+    PARTITION_KEY = 'user_id'
+
+    ACTIVITY_NONE = 'none'  # No activity at the moment
+    ACTIVITY_NEW_TASK = 'new_task'  # A message or batch of forwarding messages is being sent to the bot
+    ACTIVITY_ATTACHING = 'attaching'  # New messages are attached by command /attach123
+    ACTIVITY_DESCRIPTION_UPDATING = 'new_description'  # Waiting for new description after using inline button
+    ACTIVITY_ASSIGNING = 'new_performer'  # Waiting for new User to todo selected task. Activated by inline button
+
+    def __init__(self, user_id=0):
+        self.user_id = user_id
+        self.activity = self.ACTIVITY_NONE
+        self.chat_id = 0
+        self.task_id = 0
+        self.telegram_unixtime = 0
+        self.unixtime = 0  # it's not used for now
+
+    def update_activity(self):
+        return self.update('activity')
+
+    def update_activity_and_task(self):
+        return self.update('activity', 'task_id')
+
+    def update_activity_task_time(self):
+        return self.update('activity', 'task_id', 'telegram_unixtime')
+
+    def update_time(self):
+        return self.update('telegram_unixtime')
+
+    # Reading
+    @classmethod
+    def load_by_id(cls, id, chat=None):
+        res = super(User, cls).load_by_id(id)
+        if chat:
+            chat_id = chat['id']
+            if chat['type'] == 'private' and res.chat_id != chat_id:
+                res.chat_id = chat_id
+                res.update_chat_id()
+        return res
+
+    # Writing
+    def update_chat_id(self):
+        return self.update('chat_id')
+
+# DYNAMODB_TABLE_TASK
+# Task structure:
+#
+# {
+#   // PRIMARY KEY
+#   "id": ID, //= update_id - MIN_UPDATE_ID
+#
+#   // SECONDARY KEY (partition)
+#   // index1
+#   "from_id": USER_ID, // assigned by
+#
+#   // index2
+#   "to_id": USER_ID, // assigned to
+#
+#   // SECONDARY KEY (sort)
+#   "task_state": STATE, // STATE: O=TODO, 1=WAITING, 2=DONE, 3=CANCELED
+#
+#   // Projected keys
+#   "description": "Short representation of the TODO"
+#
+#   // Normal keys
+#   "messages": [CHAT_ID + '_' + MESSAGE_ID],
+# }
+
+
+class Task(DynamodbItem):
+    STR_PARAMS = ['description']
+    INT_PARAMS = ['id', 'from_id', 'to_id', 'task_state']
+    CHAT_MSG_PARAMS = ['messages']
+    TABLE = DYNAMODB_TABLE_TASK
+
+    def __init__(self, id=0, task_state=TASK_STATE_TODO, user_id=0):
+        self.id = id
+        self.task_state = task_state
+        self.from_id = user_id
+        self.to_id = user_id
+        self.description = '<i>New Task</i>'
+        self.messages = []
+
+    # Preparing
+    def add_message(self, message):
+        chat = message.get('chat')
+        self.messages.append((chat['id'], message['message_id']))
+
+    # Reading
+    @classmethod
+    def load_from_dict(cls, d):
+        task = super(Task, cls).load_from_dict(d)
+
+        for ss_param in cls.CHAT_MSG_PARAMS:
+            if d.get(ss_param):
+                setattr(task, ss_param, [
+                    chat_msg.split('_')
+                    for chat_msg in d[ss_param]['SS']
+                ])
+        return task
+
+    @classmethod
+    def get_tasks(cls, to_me=True, user_id=None, task_state=None):
+        # Doc: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/dynamodb.html#DynamoDB.Client.query
+        args = {
+            ':user_id': Task.elem_to_num(user_id)
+        }
+        filter_expression = None
+        if to_me:
+            condition = "to_id = :user_id"
+            index = TO_INDEX
+        else:
+            condition = "from_id = :user_id"
+            filter_expression = "to_id <> :user_id"
+            index = FROM_INDEX
+
+        if task_state is None:
+            pass
+        else:
+            condition += " and task_state = :task_state"
+            args[':task_state'] = Task.elem_to_num(task_state)
+
+        query_kwargs = dict(
+            TableName=cls.TABLE,
+            IndexName=index,
+            Select='ALL_PROJECTED_ATTRIBUTES',
+            KeyConditionExpression=condition,
+            ExpressionAttributeValues=args,
+        )
+        if filter_expression:
+            query_kwargs['FilterExpression'] = filter_expression
+
+        result = dynamodb.query(**query_kwargs)
+
+        return (cls.load_from_dict(task_dict) for task_dict in result['Items'])
+
+    # Writing
+    def to_dict(self):
+        res = super(Task, self).to_dict()
+        for ss_param in self.CHAT_MSG_PARAMS:
+            res[ss_param] = self.elem_to_array_of_str(
+                ['%s_%s' % (m[0], m[1]) for m in getattr(self, ss_param)]
+            )
+        return res
+
+    def update_task_state(self):
+        return self.update('task_state')
+
+    def update_messages(self):
+        return self.update('messages')
+
+    def update_description(self):
+        return self.update('description')
+
+    def update_assigned_to(self):
+        return self.update('to_id')
 # EOF
