@@ -83,6 +83,11 @@ def lambda_handler(event, context):
     elif user_activity.activity == User.ACTIVITY_ASSIGNING:
         # Update performer
         m = re.match('.* u([0-9]+)$', text)
+        if not m:
+            send(message, chat, '<i>Something went wrong. Try again</i>')
+            user_activity.activity = User.ACTIVITY_NONE
+            user_activity.update_activity()
+            return RESPONSE_200
         new_user_id = m.group(1)
         # USERS' keys are strings (because it's json)
         new_user_name = user_id2name(new_user_id)
