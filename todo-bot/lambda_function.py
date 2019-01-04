@@ -270,6 +270,7 @@ def print_task(message, chat, user_activity, task_id, check_rights=True, reply_m
         header += '\n%s %s' % (EMOJI_TASK_TO, user_id2name(task.to_id))
     header = '<i>%s</i>\n' % header
     header += task.description
+    header += '\n' + EMOJI_SEPARATOR_TOP
 
     bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
     for from_chat_id, msg_id in task.messages:
@@ -301,7 +302,7 @@ def print_task(message, chat, user_activity, task_id, check_rights=True, reply_m
             (ACTION_UPDATE_ASSIGNED_TO, 'Set Performer'),
         ]
         ])
-    bot.send_message(chat['id'], "<i>Use buttons below to update the task </i> /t%s. \n\n<i>To attach new messages use</i> /attach%s" % (task_id, task_id), reply_markup=buttons, parse_mode='HTML')
+    bot.send_message(chat['id'], "{separator}\n<i>Use buttons below to update the task </i> /t{task_id}. \n\n<i>To attach new messages use</i> /attach{task_id}".format(separator=EMOJI_SEPARATOR_BOTTOM, task_id=task_id), reply_markup=buttons, parse_mode='HTML')
 
     # Also, reset activity to avoid confusion
     user_activity.activity = User.ACTIVITY_NONE
@@ -372,6 +373,8 @@ EMOJI_TASK_TO = u'\u27a1'  # emoji.emojize(':arrow_right:', use_aliases=True)
 EMOJI_TASK_FROM = u'\u2709'  # emoji.emojize(':envelope:', use_aliases=True)
 EMOJI_AUTO_ATTACHED_MESSAGE = u'\U0001f9e9'  # Puzzle. No emoji alias. I got it from message's text
 EMOJI_NEW_TASK = u'\U0001f44d'  # emoji.emojize(':thumbsup:', use_aliases=True)
+EMOJI_SEPARATOR_TOP = u'\u2b07' * 10  # emoji.emojize(':arrow_down:', use_aliases=True)
+EMOJI_SEPARATOR_BOTTOM = u'\u2b06' * 10  # emoji.emojize(':arrow_up:', use_aliases=True)
 
 
 TASK_STATE_TO_HTML = {
