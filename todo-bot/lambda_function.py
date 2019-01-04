@@ -30,7 +30,7 @@ def lambda_handler(event, context):
     text = message.get('text')
 
     if not USERS:
-        USERS = {user['id']: user2name(user)}
+        USERS = {str(user['id']): user2name(user)}
 
     command, main_text = get_command_and_text(message.get('text', ''))
 
@@ -79,18 +79,21 @@ def lambda_handler(event, context):
     elif user_activity.activity == User.ACTIVITY_ASSIGNING:
         # Update performer
         m = re.match('.* u([0-9]+)$', text)
-        new_user_id = int(m.group(1))
-        new_user_name = USERS.get(new_user_id) or 'User%' % new_user_id
+        new_user_id = m.group(1)
+        # USERS' keys are strings (because it's json)
+        new_user_name = user_id2name(new_user_id)
+        new_user_id = int(new_user_id)
         task.to_id = new_user_id
         task.update_assigned_to()
         reply_text = '<i>%s is new performer for</i> /t%s' % (new_user_name, task.id)
         if user['id'] != new_user_id:
             # notify new user about the task
-            new_user_activity = User.load_by_id(new_user_id, chat)
+            new_user_activity = User.load_by_id(new_user_id)
             if new_user_activity.chat_id:
                 bot.send_message(
                     new_user_activity.chat_id,
                     '<i>You got new task from %s:\n</i>/t%s\n%s' % (user2name(user), task.id, task.description),
+                    reply_markup=ReplyKeyboardRemove(),
                     parse_mode='HTML'
                 )
 
@@ -113,7 +116,11 @@ def handle_command(update, message, chat, user, command):
     reply_text = None
     user_activity = None
     reply_markup = None
-    if command == '/users':
+    if command == '/start':
+        reply_text = '<i>Send or Forward a message to create new task</i>'
+        # create User record (see User.load_by_id method)
+        user_activity = User.load_by_id(user['id'], chat)
+    elif command == '/users':
         # Apparently, there is no way to get list of users
         pass
         # members = bot.get_chat_administrators(chat['id'])
@@ -211,12 +218,11 @@ def handle_callback(update):
     elif action == ACTION_UPDATE_ASSIGNED_TO:
         reply_text = '/t%s: <i>Send new performer or click</i> /cancel' % task_id
         reply_markup = ReplyKeyboardMarkup(row_width=3)
-        reply_markup.add([
-            KeyboardButton(
+        reply_markup.add(
+            *[KeyboardButton(
                 '%s u%s' % (user_name, user_id)
-                for user_id, user_name in USERS.items()
-            )
-        ])
+            ) for user_id, user_name in USERS.items()]
+        )
         user_activity.activity = User.ACTIVITY_ASSIGNING
         user_activity.task_id = task_id
         user_activity.update_activity_and_task()
@@ -234,8 +240,14 @@ def print_task(message, chat, user_activity, task_id, check_rights=True):
         bot.send_message(chat['id'], NOT_FOUND_MESSAGE, parse_mode='HTML')
         return False
 
-    header = "<i>Task: %s</i>\n" % task.description
-    header += "<i>State: %s</i>" % TASK_STATE_TO_HTML[task.task_state]
+    header = TASK_STATE_TO_HTML[task.task_state]
+    if user_id != task.from_id:
+        header += '\n%s %s' % (EMOJI_TASK_FROM, user_id2name(task.from_id))
+    elif user_id != task.to_id:
+        header += '\n%s %s' % (EMOJI_TASK_TO, user_id2name(task.to_id))
+    header = '<i>%s</i>\n' % header
+    header += task.description
+
     bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML')
     for from_chat_id, msg_id in task.messages:
         bot.forward_message(
@@ -333,6 +345,8 @@ EMOJI_TODO = u'\U0001f4dd'  # emoji.emojize(':memo:', use_aliases=True)
 EMOJI_WAITING = u'\U0001f4a4'  # emoji.emojize(':zzz:', use_aliases=True)
 EMOJI_DONE = u'\u2705'  # emoji.emojize(':white_check_mark:', use_aliases=True)
 EMOJI_CANCELED = u'\u274c'  # emoji.emojize(':x:', use_aliases=True)
+EMOJI_TASK_TO = u'\u27a1'  # emoji.emojize(':arrow_right:', use_aliases=True)
+EMOJI_TASK_FROM = u'\u2709'  # emoji.emojize(':envelope:', use_aliases=True)
 
 
 TASK_STATE_TO_HTML = {
@@ -367,6 +381,10 @@ def user2name(user):
     return name
 
 
+def user_id2name(user_id):
+    return USERS.get(user_id) or 'User%s' % user_id
+
+
 def message2description(message):
     user = message.get('from')
     description = '<i>Task</i>'
@@ -377,7 +395,8 @@ def message2description(message):
             if message.get(key):
                 description = text
                 break
-    description = ('<a href="tg://user?id=%s">%s</a>: ' % (user['id'], user2name(user))) + description
+    user_link = '<a href="tg://user?id=%s">%s</a>' % (user['id'], user2name(user))
+    description = '%s\nby %s' % (description, user_link)
     return description
 
 
@@ -543,12 +562,13 @@ class User(DynamodbItem):
 
     # Reading
     @classmethod
-    def load_by_id(cls, id, chat):
+    def load_by_id(cls, id, chat=None):
         res = super(User, cls).load_by_id(id)
-        chat_id = chat['id']
-        if chat['type'] == 'private' and res.chat_id != chat_id:
-            res.chat_id = chat_id
-            res.update_chat_id()
+        if chat:
+            chat_id = chat['id']
+            if chat['type'] == 'private' and res.chat_id != chat_id:
+                res.chat_id = chat_id
+                res.update_chat_id()
         return res
 
     # Writing
