@@ -59,10 +59,14 @@ def lambda_handler(event, context):
     add_message = False
     reply_text = None
     if user_activity.activity == User.ACTIVITY_NEW_TASK:
-        telegram_delta = message.get('date') - user_activity.telegram_unixtime
+        telegram_delta = abs(message.get('date') - user_activity.telegram_unixtime)
+        logger.debug('telegram_delta=%s message\'s date: %s', telegram_delta, message.get('date'))
         if telegram_delta < FORWARDING_DELAY:
             add_message = True
             reply_text = '<i>Message was automatically attached to </i>/t%s' % task.id
+            if user_activity.telegram_unixtime < message.get('date'):
+                user_activity.telegram_unixtime = message.get('date')
+                user_activity.update_time()
     elif user_activity.activity == User.ACTIVITY_ATTACHING:
         add_message = True
         reply_text = '/t%s: <i>new message is attached. Send another message to attach or click /stop_attaching</i>' % task.id
@@ -106,6 +110,10 @@ def lambda_handler(event, context):
         task.description = message2description(message)
         task.update()
         reply_text = "<i>Task created:</i> /t%s \n<i>To attach more information use</i> /attach%s" % (task.id, task.id)
+        user_activity.activity = User.ACTIVITY_NEW_TASK
+        user_activity.task_id = task_id
+        user_activity.telegram_unixtime = message.get('date')
+        user_activity.update_activity_task_time()
 
     if reply_text:
         bot.send_message(chat['id'], reply_text, reply_to_message_id=message['message_id'], parse_mode='HTML')
@@ -559,6 +567,12 @@ class User(DynamodbItem):
 
     def update_activity_and_task(self):
         return self.update('activity', 'task_id')
+
+    def update_activity_task_time(self):
+        return self.update('activity', 'task_id', 'telegram_unixtime')
+
+    def update_time(self):
+        return self.update('telegram_unixtime')
 
     # Reading
     @classmethod
