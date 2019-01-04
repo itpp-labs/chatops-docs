@@ -57,20 +57,19 @@ def lambda_handler(event, context):
             return RESPONSE_200
 
     add_message = False
-    reply_text = None
-    reply_markup = None
+
     if user_activity.activity == User.ACTIVITY_NEW_TASK:
         telegram_delta = abs(message.get('date') - user_activity.telegram_unixtime)
         logger.debug('telegram_delta=%s message\'s date: %s', telegram_delta, message.get('date'))
         if telegram_delta < FORWARDING_DELAY:
             add_message = True
-            reply_text = '<i>%s Message was automatically attached to </i>/t%s' % (EMOJI_AUTO_ATTACHED_MESSAGE, task.id)
+            send(message, chat, '<i>%s Message was automatically attached to </i>/t%s' % (EMOJI_AUTO_ATTACHED_MESSAGE, task.id))
             if user_activity.telegram_unixtime < message.get('date'):
                 user_activity.telegram_unixtime = message.get('date')
                 user_activity.update_time()
     elif user_activity.activity == User.ACTIVITY_ATTACHING:
         add_message = True
-        reply_text = '/t%s: <i>new message is attached. Send another message to attach or click</i> /stop_attaching' % task.id
+        send(message, chat, '/t%s: <i>new message is attached. Send another message to attach or click</i> /stop_attaching' % task.id)
 
     if add_message:
         # Update previous task instead of creating new one
@@ -78,9 +77,9 @@ def lambda_handler(event, context):
         task.update_messages()
     elif user_activity.activity == User.ACTIVITY_DESCRIPTION_UPDATING:
         # Update description
+        send(message, chat, '<i>Description is updated for</i> /t%s' % task.id)
         task.description = text
         task.update_description()
-        reply_text = '<i>Description is updated for</i> /t%s' % task.id
     elif user_activity.activity == User.ACTIVITY_ASSIGNING:
         # Update performer
         m = re.match('.* u([0-9]+)$', text)
@@ -88,10 +87,13 @@ def lambda_handler(event, context):
         # USERS' keys are strings (because it's json)
         new_user_name = user_id2name(new_user_id)
         new_user_id = int(new_user_id)
+
+        reply_text = '<i>%s is new performer for</i> /t%s' % (new_user_name, task.id)
+        reply_markup = ReplyKeyboardRemove()
+        send(message, chat, reply_text, reply_markup)
+
         task.to_id = new_user_id
         task.update_assigned_to()
-        reply_text = '<i>%s is new performer for</i> /t%s' % (new_user_name, task.id)
-        reply_markup = ReplyKeyboardRemove(),
         if user['id'] != new_user_id:
             # notify new user about the task
             new_user_activity = User.load_by_id(new_user_id)
@@ -106,27 +108,22 @@ def lambda_handler(event, context):
         # Just create new task
         # date = message['date']
         task_id = update['update_id'] - MIN_UPDATE_ID
+        send(message, chat, "<i>%s Task created:</i> /t%s \n<i>To attach more information use</i> /attach%s" % (EMOJI_NEW_TASK, task_id, task_id))
         task = Task(task_id, user_id=user['id'])
         task.add_message(message)
         task.description = message2description(message)
         task.update()
-        reply_text = "<i>%s Task created:</i> /t%s \n<i>To attach more information use</i> /attach%s" % (EMOJI_NEW_TASK, task.id, task.id)
         user_activity.activity = User.ACTIVITY_NEW_TASK
         user_activity.task_id = task_id
         user_activity.telegram_unixtime = message.get('date')
         user_activity.update_activity_task_time()
-
-    if reply_text:
-        bot.send_message(chat['id'], reply_text, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
     return RESPONSE_200
 
 
 def handle_command(update, message, chat, user, command):
-    reply_text = None
     user_activity = None
-    reply_markup = None
     if command == '/start':
-        reply_text = '<i>Send or Forward a message to create new task</i>'
+        send(message, chat, '<i>Send or Forward a message to create new task</i>')
         # create User record (see User.load_by_id method)
         user_activity = User.load_by_id(user['id'], chat)
     elif command == '/users':
@@ -145,10 +142,11 @@ def handle_command(update, message, chat, user, command):
         #     result[user['id']] = user2name(user_dict)
         # reply_text = json.dumps(result)
     elif command == '/myid':
-        reply_text = json.dumps({user['id']: user2name(user)})
+        send(message, chat, json.dumps({user['id']: user2name(user)}))
     elif command == '/update_id':
-        reply_text = update['update_id']
+        send(message, chat, update['update_id'])
     elif command in ['/mytasks', '/tasks_from_me']:
+        # TODO: make cache for /mytasks
         to_me = command == '/mytasks'
         task_list = Task.get_tasks(
             to_me=to_me,
@@ -156,15 +154,13 @@ def handle_command(update, message, chat, user, command):
             task_state=TASK_STATE_TODO
         )
         reply_text = ""
-        # if to_me:
-        #     reply_text = "My Tasks:\n\n"
-        # else:
-        #     reply_text = "Tasks from Me:\n\n"
         for task in task_list:
             reply_text += "/t%s:\n%s\n\n" % (task.id, task.description)
         # task_list is generator
-        if not reply_text:
-            reply_text = "<i>Tasks are not found</i>"
+        if reply_text:
+            send(message, chat, reply_text)
+        else:
+            send(message, chat, "<i>Tasks are not found</i>")
     else:
         user_activity = User.load_by_id(user['id'], chat)
 
@@ -174,24 +170,20 @@ def handle_command(update, message, chat, user, command):
         else:
             reply_text = 'Canceled'
         reply_text = '<i>%s. Send a message to create new Task</i>' % reply_text
+        send(message, chat, reply_text, ReplyKeyboardRemove())
         user_activity.activity = User.ACTIVITY_NONE
         user_activity.update_activity()
-        reply_markup = ReplyKeyboardRemove()
     elif command.startswith('/attach'):
         task_id = int(command[len('/attach'):])
+        send(message, chat, '<i>Send message to attach or click /stop_attaching</i>')
         user_activity.activity = User.ACTIVITY_ATTACHING
         user_activity.task_id = task_id
         user_activity.update_activity_and_task()
-        reply_text = '<i>Send message to attach or click /stop_attaching</i>'
     elif re.match('/t[0-9]+', command):
         task_id = int(command[2:])
-        print_task(message, chat, user_activity, task_id)
+        print_task(message, chat, user_activity, task_id, reply_markup=ReplyKeyboardRemove())
         user_activity.activity = User.ACTIVITY_NONE
         user_activity.update_activity()
-        reply_markup = ReplyKeyboardRemove()
-
-    if reply_text:
-        bot.send_message(chat['id'], reply_text, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
     return RESPONSE_200
 
 
@@ -205,6 +197,7 @@ def handle_callback(update):
         return RESPONSE_200
 
     chat = message.get('chat')
+
     # message's "from" is Bot User, not the User who clicked the inline button
     user = callback_query.get('from')
     reply_text = None
@@ -214,12 +207,12 @@ def handle_callback(update):
         task = Task.load_by_id(task_id)
         if user['id'] in [task.from_id, task.to_id]:
             task_state = callback['task_state']
-            task = Task(task_id, task_state)
-            task.update_task_state()
-            reply_text = 'New state for /t%s: %s\n\n/mytasks' % (
+            send(message, chat, 'New state for /t%s: %s\n\n/mytasks' % (
                 task_id,
                 TASK_STATE_TO_HTML[task_state]
-            )
+            ))
+            task = Task(task_id, task_state)
+            task.update_task_state()
             another_user_id = None
             if user['id'] != task.from_id:
                 another_user_id = task.from_id
@@ -231,38 +224,36 @@ def handle_callback(update):
                 if another_user_activity.chat_id:
                     bot.send_message(another_user_activity.chat_id, reply_text, parse_mode='HTML', reply_markup=reply_markup)
         else:
-            reply_text = NOT_FOUND_MESSAGE
+            send(message, chat, NOT_FOUND_MESSAGE)
     else:
         user_activity = User.load_by_id(user['id'], chat)
 
     if action == ACTION_UPDATE_DESCRIPTION:
-        reply_text = '/t%s: <i>Send new description or click</i> /cancel' % task_id
+        send(message, chat, '/t%s: <i>Send new description or click</i> /cancel' % task_id)
         user_activity.activity = User.ACTIVITY_DESCRIPTION_UPDATING
         user_activity.task_id = task_id
         user_activity.update_activity_and_task()
     elif action == ACTION_UPDATE_ASSIGNED_TO:
-        reply_text = '/t%s: <i>Send new performer or click</i> /cancel' % task_id
         reply_markup = ReplyKeyboardMarkup(row_width=3)
         reply_markup.add(
             *[KeyboardButton(
                 '%s u%s' % (user_name, user_id)
             ) for user_id, user_name in USERS.items()]
         )
+        send(message, chat, '/t%s: <i>Send new performer or click</i> /cancel' % task_id, reply_markup)
+
         user_activity.activity = User.ACTIVITY_ASSIGNING
         user_activity.task_id = task_id
         user_activity.update_activity_and_task()
-    if reply_text:
-        bot.send_message(chat['id'], reply_text, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
-
     return RESPONSE_200
 
 
-def print_task(message, chat, user_activity, task_id, check_rights=True):
+def print_task(message, chat, user_activity, task_id, check_rights=True, reply_markup=None):
     task = Task.load_by_id(task_id)
     user_id = user_activity.user_id
     if not user_id or user_id not in [task.from_id, task.to_id]:
         logger.info('No access to task %s for user %s, because from_id=%s, to_id=%s', task_id, user_id, task.from_id, task.to_id)
-        bot.send_message(chat['id'], NOT_FOUND_MESSAGE, parse_mode='HTML')
+        bot.send_message(chat['id'], NOT_FOUND_MESSAGE, parse_mode='HTML', reply_markup=reply_markup)
         return False
 
     header = TASK_STATE_TO_HTML[task.task_state]
@@ -273,7 +264,7 @@ def print_task(message, chat, user_activity, task_id, check_rights=True):
     header = '<i>%s</i>\n' % header
     header += task.description
 
-    bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML')
+    bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
     for from_chat_id, msg_id in task.messages:
         bot.forward_message(
             chat['id'],
@@ -382,6 +373,13 @@ TASK_STATE_TO_HTML = {
     TASK_STATE_DONE: "%s Done" % EMOJI_DONE,
     TASK_STATE_CANCELED: "%s Canceled" % EMOJI_CANCELED,
 }
+
+
+#####################
+# Telegram wrappers #
+#####################
+def send(message, chat, reply_text, reply_markup=None):
+    bot.send_message(chat['id'], reply_text, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
 
 
 ###########
