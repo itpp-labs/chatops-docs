@@ -113,7 +113,7 @@ def lambda_handler(event, context):
         # Just create new task
         # date = message['date']
         task_id = update['update_id'] - MIN_UPDATE_ID
-        send(message, chat, "<i>%s Task created:</i> /t%s \n<i>To attach more information use</i> /attach%s" % (EMOJI_NEW_TASK, task_id, task_id))
+        send(message, chat, "<i>{emoji} Task created:</i> /t{task_id} \n<i>To attach more information use</i> /attach{task_id}\n\n<i>To assign the task use</i> /assign{task_id}".format(emoji=EMOJI_NEW_TASK, task_id=task_id))
         task = Task(task_id, user_id=user['id'])
         task.add_message(message)
         task.description = message2description(message)
@@ -184,6 +184,13 @@ def handle_command(update, message, chat, user, command):
         user_activity.activity = User.ACTIVITY_ATTACHING
         user_activity.task_id = task_id
         user_activity.update_activity_and_task()
+    elif command.startswith('/assign'):
+        task_id = int(command[len('/assign'):])
+        reply_markup = assign_keyboard()
+        send(message, chat, '<i>Select new performer or click /cancel</i>', reply_markup)
+        user_activity.activity = User.ACTIVITY_ASSIGNING
+        user_activity.task_id = task_id
+        user_activity.update_activity_and_task()
     elif re.match('/t[0-9]+', command):
         task_id = int(command[2:])
         print_task(message, chat, user_activity, task_id, reply_markup=ReplyKeyboardRemove())
@@ -239,12 +246,7 @@ def handle_callback(update):
         user_activity.task_id = task_id
         user_activity.update_activity_and_task()
     elif action == ACTION_UPDATE_ASSIGNED_TO:
-        reply_markup = ReplyKeyboardMarkup(row_width=3)
-        reply_markup.add(
-            *[KeyboardButton(
-                '%s u%s' % (user_name, user_id)
-            ) for user_id, user_name in USERS.items()]
-        )
+        reply_markup = assign_keyboard()
         send(message, chat, '/t%s: <i>Send new performer or click</i> /cancel' % task_id, reply_markup)
 
         user_activity.activity = User.ACTIVITY_ASSIGNING
@@ -384,7 +386,18 @@ TASK_STATE_TO_HTML = {
 # Telegram wrappers #
 #####################
 def send(message, chat, reply_text, reply_markup=None):
+    logger.debug('Send message: %s', reply_text)
     bot.send_message(chat['id'], reply_text, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
+
+
+def assign_keyboard():
+    reply_markup = ReplyKeyboardMarkup(row_width=3)
+    reply_markup.add(
+        *[KeyboardButton(
+            '%s u%s' % (user_name, user_id)
+        ) for user_id, user_name in USERS.items()]
+    )
+    return reply_markup
 
 
 ###########

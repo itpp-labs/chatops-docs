@@ -30,6 +30,7 @@ Technical specification
 
 * ``/attach123`` -- attach new messages to a task
 * ``/stop_attaching`` -- treat next messages as new task
+* ``/assign123`` -- assign a task to another person
 
 .. * ``/users`` -- returns list of Administators for current chat. It's used to specify list of available users to assign the tasks. You may need to activate "All Members Are Admins" option to get list of all users.
 * ``/update_id`` -- current update_id. Can be used to set ``MIN_UPDATE_ID`` (see below)
