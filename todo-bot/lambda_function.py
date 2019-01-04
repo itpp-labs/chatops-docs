@@ -69,7 +69,7 @@ def lambda_handler(event, context):
                 user_activity.update_time()
     elif user_activity.activity == User.ACTIVITY_ATTACHING:
         add_message = True
-        reply_text = '/t%s: <i>new message is attached. Send another message to attach or click /stop_attaching</i>' % task.id
+        reply_text = '/t%s: <i>new message is attached. Send another message to attach or click</i> /stop_attaching' % task.id
 
     if add_message:
         # Update previous task instead of creating new one
@@ -182,6 +182,9 @@ def handle_command(update, message, chat, user, command):
     elif command.startswith('/t'):
         task_id = int(command[2:])
         print_task(message, chat, user_activity, task_id)
+        user_activity.activity = User.ACTIVITY_NONE
+        user_activity.update_activity()
+        reply_markup = ReplyKeyboardRemove()
 
     if reply_text:
         bot.send_message(chat['id'], reply_text, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
@@ -286,7 +289,7 @@ def print_task(message, chat, user_activity, task_id, check_rights=True):
             (ACTION_UPDATE_ASSIGNED_TO, 'Set Performer'),
         ]
         ])
-    bot.send_message(chat['id'], "<i>Update Task</i> /t%s:" % task_id, reply_markup=buttons, parse_mode='HTML')
+    bot.send_message(chat['id'], "<i>Use buttons below to update the task </i> /t%s. \n\n<i>To attach new messages use</i> /attach%s" % (task_id, task_id), reply_markup=buttons, parse_mode='HTML')
 
     # Also, reset activity to avoid confusion
     user_activity.activity = User.ACTIVITY_NONE
