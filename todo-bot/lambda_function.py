@@ -210,7 +210,7 @@ def handle_callback():
     if action == ACTION_UPDATE_TASK_STATE:
         com_update_task_state(task_id, callback['task_state'])
     elif action == ACTION_MY_TASKS:
-        com_tasks()
+        com_tasks(header='<b>My Tasks</b>', reply=False)
     else:
         user_activity = User.load_by_id(user['id'], chat)
 
@@ -297,7 +297,7 @@ def com_cancel(user_activity, cancel=True):
     user_activity.update_activity()
 
 
-def com_tasks(to_me=True):
+def com_tasks(to_me=True, header=None, reply=True):
     user_id = user['id']
     task_list = Task.get_tasks(
         to_me=to_me,
@@ -305,13 +305,16 @@ def com_tasks(to_me=True):
         task_state=TASK_STATE_TODO
     )
     reply_text = ""
+    if header:
+        reply_text += header
+        reply_text += '\n'
     for task in task_list:
         reply_text += "%s /t%s:\n%s\n\n" % (EMOJI_SEPARATOR_MY_TASKS, task.id, task_summary(task, user_id))
     # task_list is generator
     if reply_text:
-        send(reply_text)
+        send(reply_text, reply=reply)
     else:
-        send("<i>Tasks are not found</i>")
+        send("<i>Tasks are not found</i>", reply=reply)
 
 
 def com_print_task(user_activity, task_id, check_rights=True):
@@ -494,9 +497,9 @@ TASK_STATE_TO_HTML = {
 #####################
 # Telegram wrappers #
 #####################
-def send(reply_text, reply_markup=None):
+def send(reply_text, reply_markup=None, reply=True):
     logger.debug('Send message: %s', reply_text)
-    bot.send_message(chat['id'], reply_text, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
+    bot.send_message(chat['id'], reply_text, reply_to_message_id=reply and message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
 
 
 ################
