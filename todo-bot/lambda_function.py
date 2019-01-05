@@ -76,7 +76,7 @@ def lambda_handler(event, context):
         add_message = True
         buttons = InlineKeyboardMarkup(row_width=1)
         buttons.add(button_stop_attaching())
-        send('/t%s: <i>new message is attached. Send another message to attach' % task.id, buttons)
+        send('/t%s: <i>new message is attached. Send another message to attach</i>' % task.id, buttons)
 
     if add_message:
         # Update previous task instead of creating new one
@@ -84,7 +84,11 @@ def lambda_handler(event, context):
         task.update_messages()
     elif user_activity.activity == User.ACTIVITY_DESCRIPTION_UPDATING:
         # Update description
-        send('<i>Description is updated for</i> /t%s' % task.id)
+        buttons = InlineKeyboardMarkup(row_width=1)
+        buttons.add(
+            button_my_tasks()
+        )
+        send('<i>Description is updated for</i> /t%s' % task.id, buttons)
         task.description = text
         task.update_description()
     elif user_activity.activity == User.ACTIVITY_ASSIGNING:
@@ -220,13 +224,18 @@ def handle_callback():
         com_update_assigned_to(user_activity, task_id)
     elif action == ACTION_ATTACH_MESSAGES:
         com_attach(user_activity, task_id)
+    elif action in [ACTION_CANCEL, ACTION_STOP]:
+        cancel = action == ACTION_CANCEL
+        com_cancel(user_activity, cancel, reply=False)
 
     return RESPONSE_200
 
 
 def com_update_assigned_to(user_activity, task_id):
-    reply_markup = assign_keyboard()
-    send('/t%s: <i>Send new performer or click</i> /cancel' % task_id, reply_markup)
+    buttons = InlineKeyboardMarkup(row_width=1)
+    buttons.add(button_cancel())
+    send('/t%s' % task_id, assign_keyboard())
+    send('<i>Send new performer</i>', buttons)
 
     user_activity.activity = User.ACTIVITY_ASSIGNING
     user_activity.task_id = task_id
@@ -234,7 +243,9 @@ def com_update_assigned_to(user_activity, task_id):
 
 
 def com_update_description(user_activity, task_id):
-    send('/t%s: <i>Send new description or click</i> /cancel' % task_id)
+    buttons = InlineKeyboardMarkup(row_width=1)
+    buttons.add(button_cancel())
+    send('/t%s: <i>Send new description or click</i> /cancel' % task_id, buttons)
     user_activity.activity = User.ACTIVITY_DESCRIPTION_UPDATING
     user_activity.task_id = task_id
     user_activity.update_activity_and_task()
@@ -286,13 +297,13 @@ def com_attach(user_activity, task_id):
     user_activity.update_activity_and_task()
 
 
-def com_cancel(user_activity, cancel=True):
+def com_cancel(user_activity, cancel=True, reply=True):
     if cancel:
         reply_text = 'Canceled'
     else:
         reply_text = 'Stopped'
     reply_text = '<i>%s. Send a message to create new Task</i>' % reply_text
-    send(reply_text, ReplyKeyboardRemove())
+    send(reply_text, ReplyKeyboardRemove(), reply=reply)
     user_activity.activity = User.ACTIVITY_NONE
     user_activity.update_activity()
 
@@ -412,6 +423,13 @@ def button_stop_attaching():
     )
 
 
+def button_cancel():
+    return InlineKeyboardButton(
+        '{emoji} Cancel {emoji}'.format(emoji=EMOJI_CANCEL_ACTION),
+        callback_data=encode_callback(ACTION_CANCEL)
+    )
+
+
 ###############################
 # CONSTS and global variables #
 ###############################
@@ -485,6 +503,7 @@ EMOJI_UPDATE_DESCRIPTION = u'\U0001f4d6'  # emoji.emojize(u":book:", use_aliases
 EMOJI_UPDATE_ASSIGNED_TO = u'\U0001f920'  # emoji.emojize(u"🤠", use_aliases=True)
 EMOJI_MY_TASKS = u'\u2b50'  # emoji.emojize(u":star:", use_aliases=True)
 EMOJI_STOP_ATTACHING = u'\U0001f44c'  # emoji.emojize(u":ok_hand:", use_aliases=True)
+EMOJI_CANCEL_ACTION = u'\u270b'  # emoji.emojize(u":raised_hand:", use_aliases=True)
 
 TASK_STATE_TO_HTML = {
     TASK_STATE_TODO: " %s ToDo" % EMOJI_TODO,
