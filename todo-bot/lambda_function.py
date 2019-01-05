@@ -114,7 +114,7 @@ def lambda_handler(event, context):
             if new_user_activity.chat_id:
                 bot.send_message(
                     new_user_activity.chat_id,
-                    '<i>You got new task from %s:\n</i>/t%s\n%s' % (user2name(user), task.id, task.description),
+                    '<i>You got new task from %s:\n</i>/t%s\n%s' % (user2link(user), task.id, task.description),
                     parse_mode='HTML'
                 )
 
@@ -245,10 +245,7 @@ def com_update_task_state(task_id, task_state):
     if user['id'] in [task.from_id, task.to_id]:
         buttons = InlineKeyboardMarkup(row_width=1)
         buttons.add(button_my_tasks())
-        reply_text = 'New state for /t%s:\n%s' % (
-            task_id,
-            TASK_STATE_TO_HTML[task_state]
-        )
+        reply_text = TASK_STATE_TO_HTML[task_state]
         send(reply_text, buttons)
         task.task_state = task_state
         task.update_task_state()
@@ -261,7 +258,7 @@ def com_update_task_state(task_id, task_state):
         if another_user_id:
             another_user_activity = User.load_by_id(another_user_id)
             if another_user_activity.chat_id:
-                reply_text = '<b>UPDATE from</b> %s\n\n%s' % (user2name(user), reply_text)
+                reply_text = '<b>UPDATE from</b> %s for /t%s\n\n%s' % (user2link(user), task_id, reply_text)
                 bot.send_message(
                     another_user_activity.chat_id,
                     reply_text,
@@ -515,6 +512,16 @@ def get_command_and_text(text):
         return None, text
 
 
+def user2link(user):
+    user_id = user['id']
+    if str(user_id) in USERS:
+        name = user_id2name(user_id)
+    else:
+        name = user2name(user)
+    user_link = '<a href="tg://user?id=%s">%s</a>' % (user_id, name)
+    return user_link
+
+
 def user2name(user):
     name = user.get('first_name')
     if user.get('last_name'):
@@ -543,7 +550,7 @@ def message2description(message):
     if not description:
         description = '<i>Task</i>'
     if str(user['id']) not in USERS:
-        user_link = '<a href="tg://user?id=%s">%s</a>' % (user['id'], user2name(user))
+        user_link = user2link(user)
         description = '%s\nby %s' % (description, user_link)
     return description
 
