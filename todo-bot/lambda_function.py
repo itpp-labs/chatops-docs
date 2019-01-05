@@ -118,7 +118,13 @@ def lambda_handler(event, context):
         # Just create new task
         # date = message['date']
         task_id = update['update_id'] - MIN_UPDATE_ID
-        send("<i>{emoji} Task created:</i> /t{task_id} \n<i>To attach more information use</i> /attach{task_id}\n\n<i>To assign the task use</i> /assign{task_id}".format(emoji=EMOJI_NEW_TASK, task_id=task_id))
+        buttons = InlineKeyboardMarkup(row_width=1)
+        buttons.add(
+            button_update_assigned_to(task_id),
+            button_my_tasks()
+        )
+        send("<i>{emoji} Task created:</i> /t{task_id}".format(emoji=EMOJI_NEW_TASK, task_id=task_id),
+             buttons)
         task = Task(task_id, user_id=user['id'])
         task.add_message(message)
         task.description = message2description(message)
@@ -173,7 +179,7 @@ def handle_command(command):
         com_assign(task_id)
     elif re.match('/t[0-9]+', command):
         task_id = int(command[2:])
-        com_print_task(user_activity, task_id, reply_markup=ReplyKeyboardRemove())
+        com_print_task(user_activity, task_id)
     return RESPONSE_200
 
 
@@ -226,11 +232,13 @@ def com_update_description(task_id):
 def com_update_task_state(task_id, task_state):
     task = Task.load_by_id(task_id)
     if user['id'] in [task.from_id, task.to_id]:
+        buttons = InlineKeyboardMarkup(row_width=1)
+        buttons.add(button_my_tasks())
         reply_text = 'New state for /t%s: %s\n\n/mytasks' % (
             task_id,
             TASK_STATE_TO_HTML[task_state]
         )
-        send(reply_text)
+        send(reply_text, buttons)
         task = Task(task_id, task_state)
         task.update_task_state()
         another_user_id = None
@@ -243,7 +251,12 @@ def com_update_task_state(task_id, task_state):
             another_user_activity = User.load_by_id(another_user_id)
             if another_user_activity.chat_id:
                 reply_text = '<b>UPDATE from</b> %s\n\n%s' % (user2name(user), reply_text)
-                bot.send_message(another_user_activity.chat_id, reply_text, parse_mode='HTML')
+                bot.send_message(
+                    another_user_activity.chat_id,
+                    reply_text,
+                    parse_mode='HTML',
+                    reply_markup=buttons
+                )
     else:
         send(NOT_FOUND_MESSAGE)
 
@@ -275,14 +288,15 @@ def com_cancel(cancel=True):
 
 
 def com_tasks(to_me):
+    user_id = user['id']
     task_list = Task.get_tasks(
         to_me=to_me,
-        user_id=user['id'],
+        user_id=user_id,
         task_state=TASK_STATE_TODO
     )
     reply_text = ""
     for task in task_list:
-        reply_text += "/t%s:\n%s\n\n" % (task.id, task.description)
+        reply_text += "%s /t%s:\n%sn\n" % (EMOJI_SEPARATOR_MY_TASKS, task_summary(task, user_id))
     # task_list is generator
     if reply_text:
         send(reply_text)
@@ -290,24 +304,23 @@ def com_tasks(to_me):
         send("<i>Tasks are not found</i>")
 
 
-def com_print_task(user_activity, task_id, check_rights=True, reply_markup=None):
+def com_print_task(user_activity, task_id, check_rights=True):
     task = Task.load_by_id(task_id)
     user_id = user_activity.user_id
     if not user_id or user_id not in [task.from_id, task.to_id]:
         logger.info('No access to task %s for user %s, because from_id=%s, to_id=%s', task_id, user_id, task.from_id, task.to_id)
-        bot.send_message(chat['id'], NOT_FOUND_MESSAGE, parse_mode='HTML', reply_markup=reply_markup)
+        bot.send_message(chat['id'], NOT_FOUND_MESSAGE, parse_mode='HTML', reply_markup=ReplyKeyboardRemove())
         return False
 
-    header = TASK_STATE_TO_HTML[task.task_state]
-    if user_id != task.from_id:
-        header += '\n%s %s' % (EMOJI_TASK_FROM, user_id2name(task.from_id))
-    elif user_id != task.to_id:
-        header += '\n%s %s' % (EMOJI_TASK_TO, user_id2name(task.to_id))
-    header = '<i>%s</i>\n' % header
-    header += task.description
+    header = task_summary(task, user_id)
     header += '\n' + EMOJI_SEPARATOR_TOP
+    buttons = InlineKeyboardMarkup(row_width=2)
+    buttons.add(
+        button_update_description(task_id),
+        button_update_assigned_to(task_id)
+    )
 
-    bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
+    bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=ReplyKeyboardRemove())
     for from_chat_id, msg_id in task.messages:
         bot.forward_message(
             chat['id'],
@@ -329,19 +342,55 @@ def com_print_task(user_activity, task_id, check_rights=True, reply_markup=None)
         ])
     buttons.row_width = 1
     buttons.add(
-        *[InlineKeyboardButton(
-            text,
-            callback_data=encode_callback(action, task_id=task_id)
-        ) for action, text in [
-            (ACTION_UPDATE_DESCRIPTION, 'Update Description'),
-            (ACTION_UPDATE_ASSIGNED_TO, 'Set Performer'),
-        ]
-        ])
-    bot.send_message(chat['id'], "{separator}\n<i>Use buttons below to update the task </i> /t{task_id}. \n\n<i>To attach new messages use</i> /attach{task_id}".format(separator=EMOJI_SEPARATOR_BOTTOM, task_id=task_id), reply_markup=buttons, parse_mode='HTML')
+        button_attach_messages(task_id),
+        button_my_tasks()
+    )
+    bot.send_message(chat['id'], "{separator}\n<i>Use buttons below to update the task </i> /t{task_id}".format(separator=EMOJI_SEPARATOR_BOTTOM, task_id=task_id), reply_markup=buttons, parse_mode='HTML')
 
     # Also, reset activity to avoid confusion
     user_activity.activity = User.ACTIVITY_NONE
     user_activity.update_activity()
+
+
+#########################
+# Buttons and Keyboards #
+#########################
+def assign_keyboard():
+    reply_markup = ReplyKeyboardMarkup(row_width=2)
+    reply_markup.add(
+        *[KeyboardButton(
+            '%s u%s' % (user_name, user_id)
+        ) for user_id, user_name in USERS.items()]
+    )
+    return reply_markup
+
+
+def button_update_assigned_to(task_id):
+    return InlineKeyboardButton(
+        'Set Performer',
+        callback_data=encode_callback(ACTION_UPDATE_ASSIGNED_TO, task_id=task_id)
+    )
+
+
+def button_update_description(task_id):
+    return InlineKeyboardButton(
+        'Update Description',
+        callback_data=encode_callback(ACTION_UPDATE_DESCRIPTION, task_id=task_id)
+    )
+
+
+def button_attach_messages(task_id):
+    return InlineKeyboardButton(
+        'Attach Messages',
+        callback_data=encode_callback(ACTION_ATTACH_MESSAGES, task_id=task_id)
+    )
+
+
+def button_my_tasks():
+    return InlineKeyboardButton(
+        'My Tasks',
+        callback_data=encode_callback(ACTION_MY_TASKS)
+    )
 
 
 ###############################
@@ -414,6 +463,7 @@ EMOJI_AUTO_ATTACHED_MESSAGE = u'\U0001f9e9'  # Puzzle. No emoji alias. I got it 
 EMOJI_NEW_TASK = u'\U0001f44d'  # emoji.emojize(':thumbsup:', use_aliases=True)
 EMOJI_SEPARATOR_TOP = u'\u2b07' * 10  # emoji.emojize(':arrow_down:', use_aliases=True)
 EMOJI_SEPARATOR_BOTTOM = u'\u2b06' * 10  # emoji.emojize(':arrow_up:', use_aliases=True)
+EMOJI_SEPARATOR_MY_TASKS = u'\U0001f68b' * 10  # emoji.emojize(':train:', use_aliases=True)
 
 
 TASK_STATE_TO_HTML = {
@@ -432,19 +482,9 @@ def send(reply_text, reply_markup=None):
     bot.send_message(chat['id'], reply_text, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
 
 
-def assign_keyboard():
-    reply_markup = ReplyKeyboardMarkup(row_width=3)
-    reply_markup.add(
-        *[KeyboardButton(
-            '%s u%s' % (user_name, user_id)
-        ) for user_id, user_name in USERS.items()]
-    )
-    return reply_markup
-
-
-###########
-# HELPERS #
-###########
+################
+# Text Helpers #
+################
 def get_command_and_text(text):
     """split message into command and main text"""
     m = re.match('(/[^ @]*)([^ ]*)(.*)', text, re.DOTALL)
@@ -485,12 +525,24 @@ def message2description(message):
     return description
 
 
+def task_summary(task, user_id):
+    header = TASK_STATE_TO_HTML[task.task_state]
+    if user_id != task.from_id:
+        header += '\n%s %s' % (EMOJI_TASK_FROM, user_id2name(task.from_id))
+    elif user_id != task.to_id:
+        header += '\n%s %s' % (EMOJI_TASK_TO, user_id2name(task.to_id))
+    header = '<i>%s</i>\n' % header
+    header += task.description
+
+
 #############
 # Callbacks #
 #############
 ACTION_UPDATE_TASK_STATE = 'us'
 ACTION_UPDATE_DESCRIPTION = 'ud'
 ACTION_UPDATE_ASSIGNED_TO = 'ua'
+ACTION_ATTACH_MESSAGES = 'am'
+ACTION_MY_TASKS = 'mt'
 
 
 def encode_callback(action, task_id=None, task_state=None):

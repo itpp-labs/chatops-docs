@@ -105,7 +105,18 @@ Environment variables
 ~~~~~~~~~~~~~~~~~~~~~
 
 * ``BOT_TOKEN`` -- the one you got from BotFather
-* ``USERS`` -- Dictionary of users who can be assigned to a task. Format: ``{USER_ID: USER_NAME}``. At this moment there is no API to get list of members. As a workaround you can ask users to send /myid command to get name and id and prepare the dictionary manually.
+* ``USERS`` -- Dictionary of users who can be assigned to a task. Format: ``{USER_ID: USER_NAME}``. At this moment there is no API to get list of members. As a workaround you can ask users to send /myid command to get name and id and prepare the dictionary manually. To use emoji in user names to as following:
+
+   * Get emoji code via http://www.webpagefx.com/tools/emoji-cheat-sheet/
+   * Install python lib: https://pypi.python.org/pypi/emoji
+   * Prepare json in python console::
+
+     import emoji
+     import json
+     d = {"123": ":thumbsup: Ivan"}
+     print(json.dumps(dict([(k, emoji.emojize(v, use_aliases=True)) for k, v in d.items()])))
+
+
 * ``DYNAMODB_TABLE_TASK`` -- table with tasks
 * ``DYNAMODB_TABLE_USER`` -- table with users
 * ``LOG_LEVEL`` -- ``DEBUG`` or ``INFO``
