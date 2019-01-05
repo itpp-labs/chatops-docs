@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import telebot  # https://github.com/eternnoir/pyTelegramBotAPI
 from telebot.types import KeyboardButton, InlineKeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup, ReplyKeyboardRemove
 import os
@@ -201,8 +202,14 @@ def handle_callback():
     user = callback_query.get('from')
     global user_activity
     user_activity = None
+
+    # actions without activity
     if action == ACTION_UPDATE_TASK_STATE:
         com_update_task_state(task_id, callback['task_state'])
+    elif action == ACTION_MY_TASKS:
+        com_tasks()
+    elif action == ACTION_ATTACH_MESSAGES:
+        com_attach(task_id)
     else:
         user_activity = User.load_by_id(user['id'], chat)
 
@@ -210,6 +217,7 @@ def handle_callback():
         com_update_description(task_id)
     elif action == ACTION_UPDATE_ASSIGNED_TO:
         com_update_assigned_to(task_id)
+
     return RESPONSE_200
 
 
@@ -234,7 +242,7 @@ def com_update_task_state(task_id, task_state):
     if user['id'] in [task.from_id, task.to_id]:
         buttons = InlineKeyboardMarkup(row_width=1)
         buttons.add(button_my_tasks())
-        reply_text = 'New state for /t%s: %s\n\n/mytasks' % (
+        reply_text = 'New state for /t%s:\n%s' % (
             task_id,
             TASK_STATE_TO_HTML[task_state]
         )
@@ -287,7 +295,7 @@ def com_cancel(cancel=True):
     user_activity.update_activity()
 
 
-def com_tasks(to_me):
+def com_tasks(to_me=True):
     user_id = user['id']
     task_list = Task.get_tasks(
         to_me=to_me,
@@ -296,7 +304,7 @@ def com_tasks(to_me):
     )
     reply_text = ""
     for task in task_list:
-        reply_text += "%s /t%s:\n%sn\n" % (EMOJI_SEPARATOR_MY_TASKS, task_summary(task, user_id))
+        reply_text += "%s /t%s:\n%s\n\n" % (EMOJI_SEPARATOR_MY_TASKS, task.id, task_summary(task, user_id))
     # task_list is generator
     if reply_text:
         send(reply_text)
@@ -367,28 +375,28 @@ def assign_keyboard():
 
 def button_update_assigned_to(task_id):
     return InlineKeyboardButton(
-        'Set Performer',
+        '{emoji} Set Performer {emoji}'.format(emoji=EMOJI_UPDATE_ASSIGNED_TO),
         callback_data=encode_callback(ACTION_UPDATE_ASSIGNED_TO, task_id=task_id)
     )
 
 
 def button_update_description(task_id):
     return InlineKeyboardButton(
-        'Update Description',
+        '{emoji} Update Description {emoji}'.format(emoji=EMOJI_UPDATE_DESCRIPTION),
         callback_data=encode_callback(ACTION_UPDATE_DESCRIPTION, task_id=task_id)
     )
 
 
 def button_attach_messages(task_id):
     return InlineKeyboardButton(
-        'Attach Messages',
+        '{emoji} Attach Messages {emoji}'.format(emoji=EMOJI_ATTACH_MESSAGES),
         callback_data=encode_callback(ACTION_ATTACH_MESSAGES, task_id=task_id)
     )
 
 
 def button_my_tasks():
     return InlineKeyboardButton(
-        'My Tasks',
+        '{emoji} My Tasks {emoji}'.format(emoji=EMOJI_MY_TASKS),
         callback_data=encode_callback(ACTION_MY_TASKS)
     )
 
@@ -464,6 +472,10 @@ EMOJI_NEW_TASK = u'\U0001f44d'  # emoji.emojize(':thumbsup:', use_aliases=True)
 EMOJI_SEPARATOR_TOP = u'\u2b07' * 10  # emoji.emojize(':arrow_down:', use_aliases=True)
 EMOJI_SEPARATOR_BOTTOM = u'\u2b06' * 10  # emoji.emojize(':arrow_up:', use_aliases=True)
 EMOJI_SEPARATOR_MY_TASKS = u'\U0001f68b' * 10  # emoji.emojize(':train:', use_aliases=True)
+EMOJI_ATTACH_MESSAGES = u'\U0001f4ce'  # emoji.emojize(u"📎", use_aliases=True)
+EMOJI_UPDATE_DESCRIPTION = u'\U0001f4d6'  # emoji.emojize(u":book:", use_aliases=True)
+EMOJI_UPDATE_ASSIGNED_TO = u'\U0001f920'  # emoji.emojize(u"🤠", use_aliases=True)
+EMOJI_MY_TASKS = u'\u2b50'  # emoji.emojize(u":star:", use_aliases=True)
 
 
 TASK_STATE_TO_HTML = {
@@ -511,8 +523,7 @@ def user_id2name(user_id):
 
 
 def message2description(message):
-    user = message.get('from')
-    description = '<i>Task</i>'
+    description = None
     if message.get('text'):
         description = message.get('text')
     else:
@@ -520,8 +531,11 @@ def message2description(message):
             if message.get(key):
                 description = text
                 break
-    user_link = '<a href="tg://user?id=%s">%s</a>' % (user['id'], user2name(user))
-    description = '%s\nby %s' % (description, user_link)
+    if not description:
+        description = '<i>Task</i>'
+    if str(user['id']) not in USERS:
+        user_link = '<a href="tg://user?id=%s">%s</a>' % (user['id'], user2name(user))
+        description = '%s\nby %s' % (description, user_link)
     return description
 
 
@@ -533,6 +547,7 @@ def task_summary(task, user_id):
         header += '\n%s %s' % (EMOJI_TASK_TO, user_id2name(task.to_id))
     header = '<i>%s</i>\n' % header
     header += task.description
+    return header
 
 
 #############
@@ -552,6 +567,8 @@ def encode_callback(action, task_id=None, task_state=None):
             task_id,
             task_state,
         )
+    elif action in [ACTION_MY_TASKS]:
+        return action
     else:
         return '%s_%s' % (
             action,
@@ -565,6 +582,9 @@ def decode_callback(data):
     result = {
         'action': action,
     }
+    if action in [ACTION_MY_TASKS]:
+        return result
+
     task_id = splitted.pop(0)
     result['task_id'] = int(task_id)
     if action == ACTION_UPDATE_TASK_STATE:
