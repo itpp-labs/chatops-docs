@@ -17,6 +17,8 @@ Tasks can have on of the following states:
 * CANCELED -- nothing was done and not going to be done
 * WAITING -- cannot be started and waits for something
 
+.. warning:: Official telegram docs say that "Bot storage is limited", though it's unknow how much or how long messages are kept in telegram servers. That may cause losing forwarded messages, while bot keeps only message IDS and task's description.
+
 Technical specification
 =======================
 
@@ -103,7 +105,18 @@ Environment variables
 ~~~~~~~~~~~~~~~~~~~~~
 
 * ``BOT_TOKEN`` -- the one you got from BotFather
-* ``USERS`` -- Dictionary of users who can be assigned to a task. Format: ``{USER_ID: USER_NAME}``. At this moment there is no API to get list of members. As a workaround you can ask users to send /myid command to get name and id and prepare the dictionary manually.
+* ``USERS`` -- Dictionary of users who can be assigned to a task. Format: ``{USER_ID: USER_NAME}``. At this moment there is no API to get list of members. As a workaround you can ask users to send /myid command to get name and id and prepare the dictionary manually. To use emoji in user names to as following:
+
+   * Get emoji code via http://www.webpagefx.com/tools/emoji-cheat-sheet/
+   * Install python lib: https://pypi.python.org/pypi/emoji
+   * Prepare json in python console::
+
+     import emoji
+     import json
+     d = {"123": ":thumbsup: Ivan"}
+     print(json.dumps(dict([(k, emoji.emojize(v, use_aliases=True)) for k, v in d.items()])))
+
+
 * ``DYNAMODB_TABLE_TASK`` -- table with tasks
 * ``DYNAMODB_TABLE_USER`` -- table with users
 * ``LOG_LEVEL`` -- ``DEBUG`` or ``INFO``
