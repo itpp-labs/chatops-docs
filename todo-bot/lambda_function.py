@@ -13,6 +13,7 @@ def lambda_handler(event, context):
     global update
     global chat
     global user
+    global user_activity
     logger.debug("Event: \n%s", json.dumps(event))
     logger.debug("Context: \n%s", context)
     # READ webhook data
@@ -157,49 +158,22 @@ def handle_command(command):
     elif command in ['/mytasks', '/tasks_from_me']:
         # TODO: make cache for /mytasks
         to_me = command == '/mytasks'
-        task_list = Task.get_tasks(
-            to_me=to_me,
-            user_id=user['id'],
-            task_state=TASK_STATE_TODO
-        )
-        reply_text = ""
-        for task in task_list:
-            reply_text += "/t%s:\n%s\n\n" % (task.id, task.description)
-        # task_list is generator
-        if reply_text:
-            send(reply_text)
-        else:
-            send("<i>Tasks are not found</i>")
+        com_tasks(to_me)
     else:
         user_activity = User.load_by_id(user['id'], chat)
 
     if command in ['/stop_attaching', '/cancel']:
-        if command == '/stop_attaching':
-            reply_text = 'Stopped'
-        else:
-            reply_text = 'Canceled'
-        reply_text = '<i>%s. Send a message to create new Task</i>' % reply_text
-        send(reply_text, ReplyKeyboardRemove())
-        user_activity.activity = User.ACTIVITY_NONE
-        user_activity.update_activity()
+        cancel = command == '/cancel'
+        com_cancel(cancel)
     elif command.startswith('/attach'):
         task_id = int(command[len('/attach'):])
-        send('<i>Send message to attach or click /stop_attaching</i>')
-        user_activity.activity = User.ACTIVITY_ATTACHING
-        user_activity.task_id = task_id
-        user_activity.update_activity_and_task()
+        com_attach(task_id)
     elif command.startswith('/assign'):
         task_id = int(command[len('/assign'):])
-        reply_markup = assign_keyboard()
-        send('<i>Select new performer or click /cancel</i>', reply_markup)
-        user_activity.activity = User.ACTIVITY_ASSIGNING
-        user_activity.task_id = task_id
-        user_activity.update_activity_and_task()
+        com_assign(task_id)
     elif re.match('/t[0-9]+', command):
         task_id = int(command[2:])
-        print_task(user_activity, task_id, reply_markup=ReplyKeyboardRemove())
-        user_activity.activity = User.ACTIVITY_NONE
-        user_activity.update_activity()
+        com_print_task(user_activity, task_id, reply_markup=ReplyKeyboardRemove())
     return RESPONSE_200
 
 
@@ -208,58 +182,115 @@ def handle_callback():
     callback = decode_callback(callback_query.get('data'))
     task_id = callback.get('task_id')
     action = callback.get('action')
+    global message
     message = callback_query.get('message')
     if not message:
         return RESPONSE_200
 
+    global chat
     chat = message.get('chat')
 
     # message's "from" is Bot User, not the User who clicked the inline button
+    global user
     user = callback_query.get('from')
-    reply_text = None
-    reply_markup = None
+    global user_activity
     user_activity = None
     if action == ACTION_UPDATE_TASK_STATE:
-        task = Task.load_by_id(task_id)
-        if user['id'] in [task.from_id, task.to_id]:
-            task_state = callback['task_state']
-            send('New state for /t%s: %s\n\n/mytasks' % (
-                task_id,
-                TASK_STATE_TO_HTML[task_state]
-            ))
-            task = Task(task_id, task_state)
-            task.update_task_state()
-            another_user_id = None
-            if user['id'] != task.from_id:
-                another_user_id = task.from_id
-            elif user['id'] != task.to_id:
-                another_user_id = task.to_id
-
-            if another_user_id:
-                another_user_activity = User.load_by_id(another_user_id)
-                if another_user_activity.chat_id:
-                    bot.send_message(another_user_activity.chat_id, reply_text, parse_mode='HTML', reply_markup=reply_markup)
-        else:
-            send(NOT_FOUND_MESSAGE)
+        com_update_task_state(task_id, callback['task_state'])
     else:
         user_activity = User.load_by_id(user['id'], chat)
 
     if action == ACTION_UPDATE_DESCRIPTION:
-        send('/t%s: <i>Send new description or click</i> /cancel' % task_id)
-        user_activity.activity = User.ACTIVITY_DESCRIPTION_UPDATING
-        user_activity.task_id = task_id
-        user_activity.update_activity_and_task()
+        com_update_description(task_id)
     elif action == ACTION_UPDATE_ASSIGNED_TO:
-        reply_markup = assign_keyboard()
-        send('/t%s: <i>Send new performer or click</i> /cancel' % task_id, reply_markup)
-
-        user_activity.activity = User.ACTIVITY_ASSIGNING
-        user_activity.task_id = task_id
-        user_activity.update_activity_and_task()
+        com_update_assigned_to(task_id)
     return RESPONSE_200
 
 
-def print_task(user_activity, task_id, check_rights=True, reply_markup=None):
+def com_update_assigned_to(task_id):
+    reply_markup = assign_keyboard()
+    send('/t%s: <i>Send new performer or click</i> /cancel' % task_id, reply_markup)
+
+    user_activity.activity = User.ACTIVITY_ASSIGNING
+    user_activity.task_id = task_id
+    user_activity.update_activity_and_task()
+
+
+def com_update_description(task_id):
+    send('/t%s: <i>Send new description or click</i> /cancel' % task_id)
+    user_activity.activity = User.ACTIVITY_DESCRIPTION_UPDATING
+    user_activity.task_id = task_id
+    user_activity.update_activity_and_task()
+
+
+def com_update_task_state(task_id, task_state):
+    task = Task.load_by_id(task_id)
+    if user['id'] in [task.from_id, task.to_id]:
+        reply_text = 'New state for /t%s: %s\n\n/mytasks' % (
+            task_id,
+            TASK_STATE_TO_HTML[task_state]
+        )
+        send(reply_text)
+        task = Task(task_id, task_state)
+        task.update_task_state()
+        another_user_id = None
+        if user['id'] != task.from_id:
+            another_user_id = task.from_id
+        elif user['id'] != task.to_id:
+            another_user_id = task.to_id
+
+        if another_user_id:
+            another_user_activity = User.load_by_id(another_user_id)
+            if another_user_activity.chat_id:
+                reply_text = '<b>UPDATE from</b> %s\n\n%s' % (user2name(user), reply_text)
+                bot.send_message(another_user_activity.chat_id, reply_text, parse_mode='HTML')
+    else:
+        send(NOT_FOUND_MESSAGE)
+
+
+def com_assign(task_id):
+    reply_markup = assign_keyboard()
+    send('<i>Select new performer or click /cancel</i>', reply_markup)
+    user_activity.activity = User.ACTIVITY_ASSIGNING
+    user_activity.task_id = task_id
+    user_activity.update_activity_and_task()
+
+
+def com_attach(task_id):
+    send('<i>Send message to attach or click /stop_attaching</i>')
+    user_activity.activity = User.ACTIVITY_ATTACHING
+    user_activity.task_id = task_id
+    user_activity.update_activity_and_task()
+
+
+def com_cancel(cancel=True):
+    if cancel:
+        reply_text = 'Canceled'
+    else:
+        reply_text = 'Stopped'
+    reply_text = '<i>%s. Send a message to create new Task</i>' % reply_text
+    send(reply_text, ReplyKeyboardRemove())
+    user_activity.activity = User.ACTIVITY_NONE
+    user_activity.update_activity()
+
+
+def com_tasks(to_me):
+    task_list = Task.get_tasks(
+        to_me=to_me,
+        user_id=user['id'],
+        task_state=TASK_STATE_TODO
+    )
+    reply_text = ""
+    for task in task_list:
+        reply_text += "/t%s:\n%s\n\n" % (task.id, task.description)
+    # task_list is generator
+    if reply_text:
+        send(reply_text)
+    else:
+        send("<i>Tasks are not found</i>")
+
+
+def com_print_task(user_activity, task_id, check_rights=True, reply_markup=None):
     task = Task.load_by_id(task_id)
     user_id = user_activity.user_id
     if not user_id or user_id not in [task.from_id, task.to_id]:
@@ -343,7 +374,7 @@ update = None
 message = None
 chat = None
 user = None
-
+user_activity = None
 
 RESPONSE_200 = {
     "statusCode": 200,
