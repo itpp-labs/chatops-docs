@@ -6,6 +6,7 @@ import logging
 import re
 import boto3
 import json
+from datetime import datetime
 
 
 def lambda_handler(event, context):
@@ -136,6 +137,7 @@ def lambda_handler(event, context):
         task = Task(task_id, user_id=user['id'])
         task.add_message(message)
         task.description = message2description(message)
+        task.telegram_unixtime = message.get('date')
         task.update()
         user_activity.activity = User.ACTIVITY_NEW_TASK
         user_activity.task_id = task_id
@@ -336,7 +338,9 @@ def com_print_task(user_activity, task_id, check_rights=True):
         bot.send_message(chat['id'], NOT_FOUND_MESSAGE, parse_mode='HTML', reply_markup=ReplyKeyboardRemove())
         return False
 
-    header = task_summary(task, user_id)
+    header = task.description
+    header += '\n\n'
+    header += task_summary(task, user_id)
     buttons = InlineKeyboardMarkup(row_width=2)
     buttons.add(
         button_update_description(task_id),
@@ -504,6 +508,7 @@ EMOJI_UPDATE_ASSIGNED_TO = u'\U0001f920'  # emoji.emojize(u"🤠", use_aliases=T
 EMOJI_MY_TASKS = u'\u2b50'  # emoji.emojize(u":star:", use_aliases=True)
 EMOJI_STOP_ATTACHING = u'\U0001f44c'  # emoji.emojize(u":ok_hand:", use_aliases=True)
 EMOJI_CANCEL_ACTION = u'\u270b'  # emoji.emojize(u":raised_hand:", use_aliases=True)
+EMOJI_TIME = u'\U0001f550'  # emoji.emojize(u":clock1:", use_aliases=True)
 
 TASK_STATE_TO_HTML = {
     TASK_STATE_TODO: " %s ToDo" % EMOJI_TODO,
@@ -578,14 +583,62 @@ def message2description(message):
 
 
 def task_summary(task, user_id):
-    header = TASK_STATE_TO_HTML[task.task_state]
+    state = TASK_STATE_TO_HTML[task.task_state]
+
+    another_user = ''
     if user_id != task.from_id:
-        header += '\n%s %s' % (EMOJI_TASK_FROM, user_id2name(task.from_id))
+        another_user = '%s %s' % (EMOJI_TASK_FROM, user_id2name(task.from_id))
     elif user_id != task.to_id:
-        header += '\n%s %s' % (EMOJI_TASK_TO, user_id2name(task.to_id))
-    header = '<i>%s</i>\n' % header
-    header += task.description
-    return header
+        another_user = '%s %s' % (EMOJI_TASK_TO, user_id2name(task.to_id))
+    time = 'Created %s %s' % (EMOJI_TIME, pretty_date(task.telegram_unixtime)) if task.telegram_unixtime else ''
+
+    summary = ' '.join([t for t in [state, time, another_user] if t])
+    summary = '<i>%s</i>' % summary
+    return summary
+
+
+# from https://stackoverflow.com/questions/1551382/user-friendly-time-format-in-python
+def pretty_date(time=False):
+    """
+    Get a datetime object or a int() Epoch timestamp and return a
+    pretty string like 'an hour ago', 'Yesterday', '3 months ago',
+    'just now', etc
+    """
+    now = datetime.now()
+    if type(time) is int:
+        diff = now - datetime.fromtimestamp(time)
+    elif isinstance(time, datetime):
+        diff = now - time
+    elif not time:
+        diff = now - now
+    second_diff = diff.seconds
+    day_diff = diff.days
+
+    if day_diff < 0:
+        return ''
+
+    if day_diff == 0:
+        if second_diff < 10:
+            return "just now"
+        if second_diff < 60:
+            return str(second_diff) + " seconds ago"
+        if second_diff < 120:
+            return "a minute ago"
+        if second_diff < 3600:
+            return str(second_diff / 60) + " minutes ago"
+        if second_diff < 7200:
+            return "an hour ago"
+        if second_diff < 86400:
+            return str(second_diff / 3600) + " hours ago"
+    if day_diff == 1:
+        return "Yesterday"
+    if day_diff < 7:
+        return str(day_diff) + " days ago"
+    if day_diff < 31:
+        return str(day_diff / 7) + " weeks ago"
+    if day_diff < 365:
+        return str(day_diff / 30) + " months ago"
+    return str(day_diff / 365) + " years ago"
 
 
 #############
@@ -801,7 +854,8 @@ class User(DynamodbItem):
 #   "task_state": STATE, // STATE: O=TODO, 1=WAITING, 2=DONE, 3=CANCELED
 #
 #   // Projected keys
-#   "description": "Short representation of the TODO"
+#   "description": "Short representation of the TODO",
+#   "telegram_unixtime": CREATION_TIMESTAMP,
 #
 #   // Normal keys
 #   "messages": [CHAT_ID + '_' + MESSAGE_ID],
@@ -810,7 +864,7 @@ class User(DynamodbItem):
 
 class Task(DynamodbItem):
     STR_PARAMS = ['description']
-    INT_PARAMS = ['id', 'from_id', 'to_id', 'task_state']
+    INT_PARAMS = ['id', 'from_id', 'to_id', 'task_state', 'telegram_unixtime']
     CHAT_MSG_PARAMS = ['messages']
     TABLE = DYNAMODB_TABLE_TASK
 
