@@ -120,7 +120,7 @@ def lambda_handler(event, context):
             if new_user_activity.chat_id:
                 bot.send_message(
                     new_user_activity.chat_id,
-                    '<i>You got new task from %s:\n</i>/t%s\n%s' % (user2link(user), task.id, task.description),
+                    '<i>You got new task from</i> %s:\n/t%s\n%s' % (user2link(user), task.id, task.description),
                     parse_mode='HTML'
                 )
 
