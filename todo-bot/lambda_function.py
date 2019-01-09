@@ -306,7 +306,7 @@ def com_attach(user_activity, task_id):
 
 def com_cancel(user_activity, cancel=True, reply=True):
     if cancel:
-        reply_text = 'Canceled'
+        reply_text = 'Request for input is canceled'
     else:
         reply_text = 'Stopped'
     send('%s <i>%s</i>' % (EMOJI_ATTACHING_STOPPED, reply_text), ReplyKeyboardRemove(), reply=reply)
