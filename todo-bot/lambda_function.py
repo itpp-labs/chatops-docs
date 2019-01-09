@@ -394,7 +394,7 @@ def com_print_task(task_id, check_rights=True):
 # Buttons and Keyboards #
 #########################
 def assign_keyboard():
-    reply_markup = ReplyKeyboardMarkup(row_width=2)
+    reply_markup = ReplyKeyboardMarkup(row_width=3)
     reply_markup.add(
         *[KeyboardButton(
             '%s u%s' % (user_name, user_id)
