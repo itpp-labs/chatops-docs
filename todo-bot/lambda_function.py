@@ -82,8 +82,7 @@ def lambda_handler(event, context):
 
     if add_message:
         # Update previous task instead of creating new one
-        task.add_message(message)
-        task.update_messages()
+        task.add_and_update_messages(message)
     elif user_activity.activity == User.ACTIVITY_DESCRIPTION_UPDATING:
         # Update description
         buttons = InlineKeyboardMarkup(row_width=1)
@@ -906,9 +905,13 @@ class Task(DynamodbItem):
         self.messages = []
 
     # Preparing
-    def add_message(self, message):
+    @staticmethod
+    def _message2tuple(message):
         chat = message.get('chat')
-        self.messages.append((chat['id'], message['message_id']))
+        return (chat['id'], message['message_id'])
+
+    def add_message(self, message):
+        self.messages.append(self._message2tuple(message))
 
     # Reading
     @classmethod
@@ -959,23 +962,33 @@ class Task(DynamodbItem):
         return (cls.load_from_dict(task_dict) for task_dict in result['Items'])
 
     # Writing
+    @classmethod
+    def _dump_messages(self, array):
+        return self.elem_to_array_of_str(
+            ['%s_%s' % (m[0], m[1]) for m in array]
+        )
+
     def to_dict(self):
         res = super(Task, self).to_dict()
         for ss_param in self.CHAT_MSG_PARAMS:
-            res[ss_param] = self.elem_to_array_of_str(
-                ['%s_%s' % (m[0], m[1]) for m in getattr(self, ss_param)]
-            )
+            res[ss_param] = self._dump_messages(getattr(self, ss_param))
         return res
 
     def update_task_state(self):
         return self.update('task_state')
-
-    def update_messages(self):
-        return self.update('messages')
 
     def update_description(self):
         return self.update('description')
 
     def update_assigned_to(self):
         return self.update('to_id')
+
+    def add_and_update_messages(self, message):
+        array = [self._message2tuple(message)]
+        AttributeUpdates = {}
+        AttributeUpdates['messages'] = {
+            'Value': self._dump_messages(array),
+            'Action': 'ADD',
+        }
+        return self._update(AttributeUpdates)
 # EOF
