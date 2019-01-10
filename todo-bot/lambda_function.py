@@ -272,8 +272,10 @@ def com_update_task_state(task_id, task_state):
         if another_user_id:
             another_user_activity = User.load_by_id(another_user_id)
             if another_user_activity.chat_id:
-                reply_text = '<b>UPDATE from</b> %s for /t%s\n\n%s' % (user2link(user), task_id, reply_text)
+
+                reply_text = '<b>Task State is changed by</b> %s\n\n%s' % (user2link(user), task.description)
                 buttons = InlineKeyboardMarkup(row_width=1)
+                buttons.add(button_task(task, another_user_id, html=False))
                 buttons.add(button_my_tasks())
 
                 bot.send_message(
@@ -444,9 +446,9 @@ def button_cancel():
     )
 
 
-def button_task(task, user_id):
+def button_task(task, user_id, html=True):
     return InlineKeyboardButton(
-        task_summary(task, user_id),
+        task_summary(task, user_id, html),
         callback_data=encode_callback(ACTION_TASK, task.id),
     )
 
@@ -608,18 +610,31 @@ def message2description(message):
     return description
 
 
-def task_summary(task, user_id):
-    state = '<i>%s</i>' % TASK_STATE_TO_HTML[task.task_state]
+def task_summary(task, user_id, html=True):
+    def wrap(text):
+        if not html:
+            return text
+        return '<i>%s</i>' % text
 
+    state = '%s' % TASK_STATE_TO_HTML[task.task_state]
+    state = wrap(state)
     another_user = ''
     if user_id != task.from_id:
-        another_user = '%s <i>%s</i>' % (EMOJI_TASK_FROM, user_id2name(task.from_id))
+        another_user = '%s %s' % (EMOJI_TASK_FROM, user_id2name(task.from_id))
     elif user_id != task.to_id:
-        another_user = '%s <i>%s</i>' % (EMOJI_TASK_TO, user_id2name(task.to_id))
-    time = '%s <i>%s</i>' % (EMOJI_TIME, pretty_date(task.telegram_unixtime)) if task.telegram_unixtime else ''
+        another_user = '%s %s' % (EMOJI_TASK_TO, user_id2name(task.to_id))
+    if another_user:
+        another_user = wrap(another_user)
+    time = '%s %s' % (EMOJI_TIME, pretty_date(task.telegram_unixtime)) if task.telegram_unixtime else ''
+    time = wrap(time)
     task_command = '/t%s' % task.id
 
-    summary = ' '.join([t for t in [state, time, another_user, task_command] if t])
+    summary = ' '.join([t for t in [
+        state,
+        time,
+        another_user,
+        task_command
+    ] if t])
     return summary
 
 
