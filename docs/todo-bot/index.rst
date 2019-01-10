@@ -196,6 +196,11 @@ for lambda (created automatically somehow)
         ]
     }
 
+Timeout
+~~~~~~~
+
+Execution time depends on telegram server and amount of requests there. So, think about 30 seconds for limit.
+
 Register webhook at telegram
 ----------------------------
 
