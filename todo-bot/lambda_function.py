@@ -82,8 +82,7 @@ def lambda_handler(event, context):
 
     if add_message:
         # Update previous task instead of creating new one
-        task.add_message(message)
-        task.update_messages()
+        task.add_and_update_messages(message)
     elif user_activity.activity == User.ACTIVITY_DESCRIPTION_UPDATING:
         # Update description
         buttons = InlineKeyboardMarkup(row_width=1)
@@ -120,7 +119,7 @@ def lambda_handler(event, context):
             if new_user_activity.chat_id:
                 bot.send_message(
                     new_user_activity.chat_id,
-                    '<i>You got new task from %s:\n</i>/t%s\n%s' % (user2link(user), task.id, task.description),
+                    '<i>You got new task from</i> %s:\n/t%s\n%s' % (user2link(user), task.id, task.description),
                     parse_mode='HTML'
                 )
 
@@ -306,7 +305,7 @@ def com_attach(user_activity, task_id):
 
 def com_cancel(user_activity, cancel=True, reply=True):
     if cancel:
-        reply_text = 'Canceled'
+        reply_text = 'Request for input is canceled'
     else:
         reply_text = 'Stopped'
     send('%s <i>%s</i>' % (EMOJI_ATTACHING_STOPPED, reply_text), ReplyKeyboardRemove(), reply=reply)
@@ -394,7 +393,7 @@ def com_print_task(task_id, check_rights=True):
 # Buttons and Keyboards #
 #########################
 def assign_keyboard():
-    reply_markup = ReplyKeyboardMarkup(row_width=2)
+    reply_markup = ReplyKeyboardMarkup(row_width=3)
     reply_markup.add(
         *[KeyboardButton(
             '%s u%s' % (user_name, user_id)
@@ -906,9 +905,13 @@ class Task(DynamodbItem):
         self.messages = []
 
     # Preparing
-    def add_message(self, message):
+    @staticmethod
+    def _message2tuple(message):
         chat = message.get('chat')
-        self.messages.append((chat['id'], message['message_id']))
+        return (chat['id'], message['message_id'])
+
+    def add_message(self, message):
+        self.messages.append(self._message2tuple(message))
 
     # Reading
     @classmethod
@@ -959,23 +962,33 @@ class Task(DynamodbItem):
         return (cls.load_from_dict(task_dict) for task_dict in result['Items'])
 
     # Writing
+    @classmethod
+    def _dump_messages(self, array):
+        return self.elem_to_array_of_str(
+            ['%s_%s' % (m[0], m[1]) for m in array]
+        )
+
     def to_dict(self):
         res = super(Task, self).to_dict()
         for ss_param in self.CHAT_MSG_PARAMS:
-            res[ss_param] = self.elem_to_array_of_str(
-                ['%s_%s' % (m[0], m[1]) for m in getattr(self, ss_param)]
-            )
+            res[ss_param] = self._dump_messages(getattr(self, ss_param))
         return res
 
     def update_task_state(self):
         return self.update('task_state')
-
-    def update_messages(self):
-        return self.update('messages')
 
     def update_description(self):
         return self.update('description')
 
     def update_assigned_to(self):
         return self.update('to_id')
+
+    def add_and_update_messages(self, message):
+        array = [self._message2tuple(message)]
+        AttributeUpdates = {}
+        AttributeUpdates['messages'] = {
+            'Value': self._dump_messages(array),
+            'Action': 'ADD',
+        }
+        return self._update(AttributeUpdates)
 # EOF
