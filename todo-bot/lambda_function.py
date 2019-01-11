@@ -218,6 +218,8 @@ def handle_callback():
         com_update_task_state(task_id, callback['task_state'])
     elif action == ACTION_MY_TASKS:
         com_tasks(header='<b>My Tasks</b>', reply=False)
+    elif action == ACTION_TASKS_FROM_ME:
+        com_tasks(to_me=False, header='<b>Tasks From Me</b>', reply=False)
     elif action == ACTION_TASK:
         com_print_task(task_id)
     else:
@@ -276,6 +278,7 @@ def com_update_task_state(task_id, task_state):
                 reply_text = '<b>Task State is changed by</b> %s\n\n%s' % (user2link(user), task.description)
                 buttons = InlineKeyboardMarkup(row_width=1)
                 buttons.add(button_task(task, another_user_id, html=False))
+                buttons.add(button_tasks_from_me())
                 buttons.add(button_my_tasks())
 
                 bot.send_message(
@@ -432,6 +435,13 @@ def button_my_tasks():
     )
 
 
+def button_tasks_from_me():
+    return InlineKeyboardButton(
+        '{emoji} Tasks From Me {emoji}'.format(emoji=EMOJI_TASKS_FROM_ME),
+        callback_data=encode_callback(ACTION_TASKS_FROM_ME)
+    )
+
+
 def button_stop_attaching():
     return InlineKeyboardButton(
         '{emoji} Stop Attaching {emoji}'.format(emoji=EMOJI_STOP_ATTACHING),
@@ -528,6 +538,7 @@ EMOJI_SEPARATOR_MY_TASKS = u'\U0001f68b' * 10  # emoji.emojize(':train:', use_al
 EMOJI_UPDATE_DESCRIPTION = u'\U0001f4d6'  # emoji.emojize(u":book:", use_aliases=True)
 EMOJI_UPDATE_ASSIGNED_TO = u'\U0001f920'  # emoji.emojize(u"🤠", use_aliases=True)
 EMOJI_MY_TASKS = u'\u2b50'  # emoji.emojize(u":star:", use_aliases=True)
+EMOJI_TASKS_FROM_ME = EMOJI_TASK_TO
 EMOJI_STOP_ATTACHING = u'\U0001f44c'  # emoji.emojize(u":ok_hand:", use_aliases=True)
 EMOJI_CANCEL_ACTION = u'\u270b'  # emoji.emojize(u":raised_hand:", use_aliases=True)
 EMOJI_TIME = u'\U0001f550'  # emoji.emojize(u":clock1:", use_aliases=True)
@@ -693,10 +704,11 @@ ACTION_ATTACH_MESSAGES = 'am'
 ACTION_TASK = 'at'
 
 ACTION_MY_TASKS = 'mt'
+ACTION_TASKS_FROM_ME = 'tfm'
 ACTION_STOP = 's'
 ACTION_CANCEL = 'c'
 
-ACTIONS_WITHOUT_DATA = [ACTION_MY_TASKS, ACTION_STOP, ACTION_CANCEL]
+ACTIONS_WITHOUT_DATA = [ACTION_MY_TASKS, ACTION_STOP, ACTION_CANCEL, ACTION_TASKS_FROM_ME]
 # ACTIONS_WITH_TASK = [ACTION_UPDATE_DESCRIPTION, ACTION_UPDATE_ASSIGNED_TO, ACTION_ATTACH_MESSAGES]
 
 
