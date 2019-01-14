@@ -565,7 +565,7 @@ def send(reply_text, reply_markup=None, reply=True):
 def mark_state(state_html, state, current_state):
     if state != current_state:
         return state_html
-    return state_html.upper() + '*'
+    return '*' + state_html.upper()
 
 
 def get_command_and_text(text):
