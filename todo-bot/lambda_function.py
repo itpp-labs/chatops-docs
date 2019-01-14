@@ -35,9 +35,6 @@ def lambda_handler(event, context):
     user = message.get('from')
     text = message.get('text')
 
-    if not USERS:
-        USERS = {str(user['id']): user2name(user)}
-
     command, main_text = get_command_and_text(message.get('text', ''))
 
     if command:
@@ -123,9 +120,10 @@ def lambda_handler(event, context):
                     parse_mode='HTML'
                 )
 
+    elif str(user['id']) not in USERS:
+        send('<i>It\'s a private bot, sorry. But you can create new one for yourself: </i> https://chatops.readthedocs.io/en/latest/todo-bot/index.html')
     else:
         # Just create new task
-        # date = message['date']
         task_id = update['update_id'] - MIN_UPDATE_ID
         buttons = InlineKeyboardMarkup(row_width=1)
         buttons.add(
@@ -473,7 +471,7 @@ TO_INDEX = 'to_id-task_state-index'
 
 # READ environment variables
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-USERS = os.environ.get('USERS')
+USERS = os.environ.get('USERS', '{}')
 if USERS:
     USERS = dict(json.loads(USERS))
 DYNAMODB_TABLE_TASK = os.environ.get('DYNAMODB_TABLE_TASK')
