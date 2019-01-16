@@ -64,7 +64,7 @@ def lambda_handler(event, context):
     if user_activity.activity == User.ACTIVITY_NEW_TASK:
         telegram_delta = abs(message.get('date') - user_activity.telegram_unixtime)
         logger.debug('telegram_delta=%s message\'s date: %s', telegram_delta, message.get('date'))
-        if telegram_delta < FORWARDING_DELAY:
+        if message.get('forward_from') and telegram_delta < FORWARDING_DELAY:
             add_message = True
             send('<i>%s Message was automatically attached to </i>/t%s' % (EMOJI_AUTO_ATTACHED_MESSAGE, task.id))
             if user_activity.telegram_unixtime < message.get('date'):
