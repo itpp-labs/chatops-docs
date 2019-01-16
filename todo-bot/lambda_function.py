@@ -91,6 +91,8 @@ def lambda_handler(event, context):
         send('<i>Description is updated for</i> /t%s' % task.id, buttons)
         task.description = text
         task.update_description()
+        user_activity.activity = User.ACTIVITY_NONE
+        user_activity.update_activity()
     elif user_activity.activity == User.ACTIVITY_ASSIGNING:
         # Update performer
         m = re.match('.* u([0-9]+)$', text)
