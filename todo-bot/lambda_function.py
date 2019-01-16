@@ -542,7 +542,7 @@ EMOJI_ATTACH_MESSAGES = EMOJI_AUTO_ATTACHED_MESSAGE
 EMOJI_ATTACHED_MESSAGE = EMOJI_AUTO_ATTACHED_MESSAGE
 EMOJI_ATTACHING_STOPPED = u'\U0001f44d'  # Thumbup
 EMOJI_SEND_MESSAGE_TO_ATTACH = u'\u2709' + EMOJI_AUTO_ATTACHED_MESSAGE  # envelope + puzzle
-EMOJI_NEW_TASK = u'\U0001f44d'  # emoji.emojize(':thumbsup:', use_aliases=True)
+EMOJI_NEW_TASK = u'\U0001f609'  # emoji.emojize(':wink:', use_aliases=True)
 EMOJI_SEPARATOR_MY_TASKS = u'\U0001f68b' * 10  # emoji.emojize(':train:', use_aliases=True)
 EMOJI_UPDATE_DESCRIPTION = u'\U0001f4d6'  # emoji.emojize(u":book:", use_aliases=True)
 EMOJI_UPDATE_ASSIGNED_TO = u'\U0001f920'  # emoji.emojize(u"🤠", use_aliases=True)
@@ -551,6 +551,9 @@ EMOJI_TASKS_FROM_ME = EMOJI_TASK_TO
 EMOJI_STOP_ATTACHING = u'\U0001f44c'  # emoji.emojize(u":ok_hand:", use_aliases=True)
 EMOJI_CANCEL_ACTION = u'\u270b'  # emoji.emojize(u":raised_hand:", use_aliases=True)
 EMOJI_TIME = u'\U0001f550'  # emoji.emojize(u":clock1:", use_aliases=True)
+EMOJI_NEW_TASK_FROM_ANOTHER = u'\U0001f381'  # emoji.emojize(u":gift:", use_aliases=True)
+EMOJI_NEW_STATE_FROM_ANOTHER = u'\U0001f60d'  # emoji.emojize(u":heart_eyes:", use_aliases=True)
+
 
 TASK_STATE_TO_HTML = {
     TASK_STATE_TODO: "%s To-Do" % EMOJI_TODO,
