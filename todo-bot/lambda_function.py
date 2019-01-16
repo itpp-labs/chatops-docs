@@ -89,10 +89,18 @@ def lambda_handler(event, context):
             button_my_tasks()
         )
         send('<i>Description is updated for</i> /t%s' % task.id, buttons)
+        old_description = task.description
         task.description = text
         task.update_description()
         user_activity.activity = User.ACTIVITY_NONE
         user_activity.update_activity()
+
+        notify_another_user(
+            task,
+            '<b>%s Task Description is updated by</b> %s\n\n<b>NEW:</b> %s\n\n<b>OLD:</b> %s' % (EMOJI_NEW_DESCRIPTION_FROM_ANOTHER, user2link(user), task.description, old_description)
+        )
+
+
     elif user_activity.activity == User.ACTIVITY_ASSIGNING:
         # Update performer
         m = re.match('.* u([0-9]+)$', text)
@@ -120,7 +128,7 @@ def lambda_handler(event, context):
             if new_user_activity.chat_id:
                 bot.send_message(
                     new_user_activity.chat_id,
-                    '<i>You got new task from</i> %s:\n/t%s\n%s' % (user2link(user), task.id, task.description),
+                    '<i>%s You got new task from</i> %s:\n/t%s\n%s' % (EMOJI_NEW_TASK_FROM_ANOTHER, user2link(user), task.id, task.description),
                     parse_mode='HTML'
                 )
 
@@ -266,7 +274,6 @@ def com_update_description(user_activity, task_id):
     user_activity.task_id = task_id
     user_activity.update_activity_and_task()
 
-
 def com_update_task_state(task_id, task_state):
     task = Task.load_by_id(task_id)
     if user['id'] in [task.from_id, task.to_id]:
@@ -274,28 +281,11 @@ def com_update_task_state(task_id, task_state):
         send(reply_text)
         task.task_state = task_state
         task.update_task_state()
-        another_user_id = None
-        if user['id'] != task.from_id:
-            another_user_id = task.from_id
-        elif user['id'] != task.to_id:
-            another_user_id = task.to_id
 
-        if another_user_id:
-            another_user_activity = User.load_by_id(another_user_id)
-            if another_user_activity.chat_id:
-
-                reply_text = '<b>Task State is changed by</b> %s\n\n%s' % (user2link(user), task.description)
-                buttons = InlineKeyboardMarkup(row_width=1)
-                buttons.add(button_task(task, another_user_id, html=False))
-                buttons.add(button_tasks_from_me())
-                buttons.add(button_my_tasks())
-
-                bot.send_message(
-                    another_user_activity.chat_id,
-                    reply_text,
-                    parse_mode='HTML',
-                    reply_markup=buttons
-                )
+        notify_another_user(
+            task,
+            '<b>%s Task State is changed by</b> %s\n\n%s' % (EMOJI_NEW_STATE_FROM_ANOTHER, user2link(user), task.description)
+        )
     else:
         send(NOT_FOUND_MESSAGE)
 
@@ -553,6 +543,7 @@ EMOJI_CANCEL_ACTION = u'\u270b'  # emoji.emojize(u":raised_hand:", use_aliases=T
 EMOJI_TIME = u'\U0001f550'  # emoji.emojize(u":clock1:", use_aliases=True)
 EMOJI_NEW_TASK_FROM_ANOTHER = u'\U0001f381'  # emoji.emojize(u":gift:", use_aliases=True)
 EMOJI_NEW_STATE_FROM_ANOTHER = u'\U0001f60d'  # emoji.emojize(u":heart_eyes:", use_aliases=True)
+EMOJI_NEW_DESCRIPTION_FROM_ANOTHER = u'\U0001f914'  # thinking
 
 
 TASK_STATE_TO_HTML = {
@@ -570,6 +561,32 @@ def send(reply_text, reply_markup=None, reply=True):
     logger.debug('Send message: %s', reply_text)
     bot.send_message(chat['id'], reply_text, reply_to_message_id=reply and message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
 
+
+def notify_another_user(task, reply_text):
+    another_user_id = None
+    if user['id'] != task.from_id:
+        another_user_id = task.from_id
+    elif user['id'] != task.to_id:
+        another_user_id = task.to_id
+
+    if not another_user_id:
+        return
+
+    another_user_activity = User.load_by_id(another_user_id)
+    if not another_user_activity.chat_id:
+        return
+
+    buttons = InlineKeyboardMarkup(row_width=1)
+    buttons.add(button_task(task, another_user_id, html=False))
+    buttons.add(button_tasks_from_me())
+    buttons.add(button_my_tasks())
+
+    bot.send_message(
+        another_user_activity.chat_id,
+        reply_text,
+        parse_mode='HTML',
+        reply_markup=buttons
+    )
 
 ################
 # Text Helpers #
