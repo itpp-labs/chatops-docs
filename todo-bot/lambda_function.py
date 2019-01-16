@@ -52,7 +52,9 @@ def lambda_handler(event, context):
     task_from_me = None
     task_to_me = None
     if activity and activity != User.ACTIVITY_NONE:
-        task = Task.load_by_id(user_activity.task_id)
+        # In case of concurency we raise error to force telegram resend the
+        # message when task is not saved by another process yet
+        task = Task.load_by_id(user_activity.task_id, raise_if_not_found=True)
         task_from_me = user['id'] == task.from_id
         task_to_me = user['id'] == task.to_id
         if not (task_from_me or task_to_me):
@@ -133,15 +135,22 @@ def lambda_handler(event, context):
         )
         send("<i>{emoji} Task created:</i> /t{task_id}".format(emoji=EMOJI_NEW_TASK, task_id=task_id),
              buttons)
+        # It's important to update activity first, because second message in a
+        # batch can be proceeded by another process, so we have to update activity ASAP.
+        # Though, there is no gurantee that this process will do it faster.
+        # A strong solution is avoiding concurency via Lambda config "Reserve concurrency = 1"
+        # OR by making FIFO queue per user
+        # OR using lock in user activity
+        user_activity.activity = User.ACTIVITY_NEW_TASK
+        user_activity.task_id = task_id
+        user_activity.telegram_unixtime = message.get('date')
+        user_activity.update_activity_task_time()
+
         task = Task(task_id, user_id=user['id'])
         task.add_message(message)
         task.description = message2description(message)
         task.telegram_unixtime = message.get('date')
         task.update()
-        user_activity.activity = User.ACTIVITY_NEW_TASK
-        user_activity.task_id = task_id
-        user_activity.telegram_unixtime = message.get('date')
-        user_activity.update_activity_task_time()
     return RESPONSE_200
 
 
@@ -756,7 +765,7 @@ class DynamodbItem(object):
 
     # Reading
     @classmethod
-    def load_by_id(cls, id):
+    def load_by_id(cls, id, raise_if_not_found=False):
         res = dynamodb.get_item(
             TableName=cls.TABLE,
             Key={
@@ -764,8 +773,11 @@ class DynamodbItem(object):
             }
         )
         if not res.get('Item'):
-            # New Item
-            return cls(id)
+            if raise_if_not_found:
+                raise Exception("Attempt for loading unexisting record: %s")
+            else:
+                # New Item
+                return cls(id)
         return cls.load_from_dict(res['Item'])
 
     @classmethod
