@@ -66,7 +66,8 @@ def lambda_handler(event, context):
     if user_activity.activity == User.ACTIVITY_NEW_TASK:
         telegram_delta = abs(message.get('date') - user_activity.telegram_unixtime)
         logger.debug('telegram_delta=%s message\'s date: %s', telegram_delta, message.get('date'))
-        if message.get('forward_from') and telegram_delta < FORWARDING_DELAY:
+        if (message.get('forward_from') or not message.get('text')) and telegram_delta < FORWARDING_DELAY:
+            # automatically attached series of message, but only forwarded or media messages
             add_message = True
             send('<i>%s Message was automatically attached to </i>/t%s' % (EMOJI_AUTO_ATTACHED_MESSAGE, task.id))
             if user_activity.telegram_unixtime < message.get('date'):
@@ -99,7 +100,6 @@ def lambda_handler(event, context):
             task,
             '<b>%s Task Description is updated by</b> %s\n\n<b>NEW:</b> %s\n\n<b>OLD:</b> %s' % (EMOJI_NEW_DESCRIPTION_FROM_ANOTHER, user2link(user), task.description, old_description)
         )
-
 
     elif user_activity.activity == User.ACTIVITY_ASSIGNING:
         # Update performer
