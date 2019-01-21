@@ -98,7 +98,12 @@ def lambda_handler(event, context):
 
         notify_another_user(
             task,
-            '<b>%s Task Description is updated by</b> %s\n\n<b>NEW:</b> %s\n\n<b>OLD:</b> %s' % (EMOJI_NEW_DESCRIPTION_FROM_ANOTHER, user2link(user), task.description, old_description)
+            '<b>%s Task Description is updated by</b> %s\n\n<b>NEW:</b> %s\n\n<b>OLD:</b> %s' % (
+                EMOJI_NEW_DESCRIPTION_FROM_ANOTHER,
+                user2link(user),
+                escape_html(task.description),
+                escape_html(old_description)
+            )
         )
 
     elif user_activity.activity == User.ACTIVITY_ASSIGNING:
@@ -128,7 +133,12 @@ def lambda_handler(event, context):
             if new_user_activity.chat_id:
                 bot.send_message(
                     new_user_activity.chat_id,
-                    '<i>%s You got new task from</i> %s:\n/t%s\n%s' % (EMOJI_NEW_TASK_FROM_ANOTHER, user2link(user), task.id, task.description),
+                    '<i>%s You got new task from</i> %s:\n/t%s\n%s' % (
+                        EMOJI_NEW_TASK_FROM_ANOTHER,
+                        user2link(user),
+                        task.id,
+                        escape_html(task.description),
+                    ),
                     parse_mode='HTML'
                 )
 
@@ -284,7 +294,11 @@ def com_update_task_state(task_id, task_state):
 
         notify_another_user(
             task,
-            '<b>%s Task State is changed by</b> %s\n\n%s' % (EMOJI_NEW_STATE_FROM_ANOTHER, user2link(user), task.description)
+            '<b>%s Task State is changed by</b> %s\n\n%s' % (
+                EMOJI_NEW_STATE_FROM_ANOTHER,
+                user2link(user),
+                escape_html(task.description)
+            )
         )
     else:
         send(NOT_FOUND_MESSAGE)
@@ -338,7 +352,7 @@ def com_tasks(to_me=True, header=None, reply=True):
         # buttons = InlineKeyboardMarkup(row_width=1)
         # buttons.add(button_task(task, user_id))
         reply_text = '%s\n\n%s' % (
-            task.description,
+            escape_html(task.description),
             task_summary(task, user_id)
         )
         send(reply_text, reply=False)
@@ -356,7 +370,7 @@ def com_print_task(task_id, check_rights=True):
         bot.send_message(chat['id'], NOT_FOUND_MESSAGE, parse_mode='HTML', reply_markup=ReplyKeyboardRemove())
         return False
 
-    header = task.description
+    header = escape_html(task.description)
     header += '\n\n'
     header += task_summary(task, user_id)
     buttons = InlineKeyboardMarkup(row_width=2)
@@ -587,6 +601,11 @@ def notify_another_user(task, reply_text):
         parse_mode='HTML',
         reply_markup=buttons
     )
+
+
+def escape_html(text):
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
 
 ################
 # Text Helpers #
@@ -840,7 +859,7 @@ class DynamodbItem(object):
         return dynamodb.update_item(
             TableName=self.TABLE,
             Key={
-                self.PARTITION_KEY: Task.elem_to_num(getattr(self, self.PARTITION_KEY))
+                self.PARTITION_KEY: DynamodbItem.elem_to_num(getattr(self, self.PARTITION_KEY))
             },
             AttributeUpdates=AttributeUpdates,
         )
@@ -862,7 +881,7 @@ class DynamodbItem(object):
             return self._update(AttributeUpdates)
 
 
-# DYNAMODB_TABLE_TASK
+# DYNAMODB_TABLE_USER
 # Task structure:
 #
 # {
@@ -960,7 +979,7 @@ class Task(DynamodbItem):
         self.from_id = user_id
         self.to_id = user_id
         self.telegram_unixtime = 0
-        self.description = '<i>New Task</i>'
+        self.description = '*New Task*'
         self.messages = []
 
     # Preparing
