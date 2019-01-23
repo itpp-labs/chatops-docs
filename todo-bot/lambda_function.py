@@ -66,7 +66,9 @@ def lambda_handler(event, context):
     if user_activity.activity == User.ACTIVITY_NEW_TASK:
         telegram_delta = abs(message.get('date') - user_activity.telegram_unixtime)
         logger.debug('telegram_delta=%s message\'s date: %s', telegram_delta, message.get('date'))
-        if (message.get('forward_from') or not message.get('text')) and telegram_delta < FORWARDING_DELAY:
+        # Share button in iOS allows send couple of messages as a batch
+        second_message = len(task.messages) == 1
+        if (message.get('forward_from') or second_message) and telegram_delta < FORWARDING_DELAY:
             # automatically attached series of message, but only forwarded or media messages
             add_message = True
             send('<i>%s Message was automatically attached to </i>/t%s' % (EMOJI_AUTO_ATTACHED_MESSAGE, task.id))
