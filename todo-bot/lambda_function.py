@@ -242,6 +242,7 @@ def handle_callback():
     user_activity = None
     # actions without activity
     if action == ACTION_UPDATE_TASK_STATE:
+        # TODO: update buttons where is was clicked
         com_update_task_state(task_id, callback['task_state'])
     elif action == ACTION_MY_TASKS:
         com_tasks(header='<b>My Tasks</b>', reply=False)
@@ -355,7 +356,8 @@ def com_tasks(to_me=True, header=None, reply=True):
             escape_html(task.description),
             task_summary(task, user_id)
         )
-        send(reply_text, reply=False)
+        reply_markup = task_state_keyboard(task, row_width=4)
+        send(reply_text, reply=False, reply_markup=reply_markup)
         not_found = False
 
     if not_found:
@@ -387,18 +389,7 @@ def com_print_task(task_id, check_rights=True):
             message_id=msg_id,
         )
 
-    buttons = InlineKeyboardMarkup(row_width=2)
-    buttons.add(
-        *[InlineKeyboardButton(
-            mark_state(TASK_STATE_TO_HTML[task_state], task_state, task.task_state),
-            callback_data=encode_callback(ACTION_UPDATE_TASK_STATE, task_state=task_state, task_id=task_id)
-        ) for task_state in [
-            TASK_STATE_TODO,
-            TASK_STATE_DONE,
-            TASK_STATE_WAITING,
-            TASK_STATE_CANCELED,
-        ]
-        ])
+    buttons = task_state_keyboard(task)
     buttons.row_width = 1
     buttons.add(
         button_attach_messages(task_id),
@@ -410,6 +401,22 @@ def com_print_task(task_id, check_rights=True):
 #########################
 # Buttons and Keyboards #
 #########################
+def task_state_keyboard(task, row_width=4):
+    buttons = InlineKeyboardMarkup(row_width=row_width)
+    buttons.add(
+        *[InlineKeyboardButton(
+            mark_state(TASK_STATE_TO_HTML[task_state], task_state, task.task_state),
+            callback_data=encode_callback(ACTION_UPDATE_TASK_STATE, task_state=task_state, task_id=task.id)
+        ) for task_state in [
+            TASK_STATE_TODO,
+            TASK_STATE_DONE,
+            TASK_STATE_WAITING,
+            TASK_STATE_CANCELED,
+        ]
+        ])
+    return buttons
+
+
 def assign_keyboard():
     reply_markup = ReplyKeyboardMarkup(row_width=3)
     reply_markup.add(
