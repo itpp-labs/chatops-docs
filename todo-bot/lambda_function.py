@@ -35,9 +35,6 @@ def lambda_handler(event, context):
     user = message.get('from')
     text = message.get('text')
 
-    if not USERS:
-        USERS = {str(user['id']): user2name(user)}
-
     command, main_text = get_command_and_text(message.get('text', ''))
 
     if command:
@@ -55,7 +52,9 @@ def lambda_handler(event, context):
     task_from_me = None
     task_to_me = None
     if activity and activity != User.ACTIVITY_NONE:
-        task = Task.load_by_id(user_activity.task_id)
+        # In case of concurency we raise error to force telegram resend the
+        # message when task is not saved by another process yet
+        task = Task.load_by_id(user_activity.task_id, raise_if_not_found=True)
         task_from_me = user['id'] == task.from_id
         task_to_me = user['id'] == task.to_id
         if not (task_from_me or task_to_me):
@@ -67,7 +66,10 @@ def lambda_handler(event, context):
     if user_activity.activity == User.ACTIVITY_NEW_TASK:
         telegram_delta = abs(message.get('date') - user_activity.telegram_unixtime)
         logger.debug('telegram_delta=%s message\'s date: %s', telegram_delta, message.get('date'))
-        if telegram_delta < FORWARDING_DELAY:
+        # Share button in iOS allows send couple of messages as a batch
+        second_message = len(task.messages) == 1
+        if (message.get('forward_from') or second_message) and telegram_delta < FORWARDING_DELAY:
+            # automatically attached series of message, but only forwarded or media messages
             add_message = True
             send('<i>%s Message was automatically attached to </i>/t%s' % (EMOJI_AUTO_ATTACHED_MESSAGE, task.id))
             if user_activity.telegram_unixtime < message.get('date'):
@@ -90,8 +92,22 @@ def lambda_handler(event, context):
             button_my_tasks()
         )
         send('<i>Description is updated for</i> /t%s' % task.id, buttons)
+        old_description = task.description
         task.description = text
         task.update_description()
+        user_activity.activity = User.ACTIVITY_NONE
+        user_activity.update_activity()
+
+        notify_another_user(
+            task,
+            '<b>%s Task Description is updated by</b> %s\n\n<b>NEW:</b> %s\n\n<b>OLD:</b> %s' % (
+                EMOJI_NEW_DESCRIPTION_FROM_ANOTHER,
+                user2link(user),
+                escape_html(task.description),
+                escape_html(old_description)
+            )
+        )
+
     elif user_activity.activity == User.ACTIVITY_ASSIGNING:
         # Update performer
         m = re.match('.* u([0-9]+)$', text)
@@ -119,31 +135,39 @@ def lambda_handler(event, context):
             if new_user_activity.chat_id:
                 bot.send_message(
                     new_user_activity.chat_id,
-                    '<i>You got new task from</i> %s:\n/t%s\n%s' % (user2link(user), task.id, task.description),
+                    '<i>%s You got new task from</i> %s:\n/t%s\n%s' % (
+                        EMOJI_NEW_TASK_FROM_ANOTHER,
+                        user2link(user),
+                        task.id,
+                        escape_html(task.description),
+                    ),
                     parse_mode='HTML'
                 )
 
+    elif str(user['id']) not in USERS:
+        send('<i>It\'s a private bot, sorry. But you can create new one for yourself: </i> https://chatops.readthedocs.io/en/latest/todo-bot/index.html')
     else:
         # Just create new task
-        # date = message['date']
         task_id = update['update_id'] - MIN_UPDATE_ID
-        buttons = InlineKeyboardMarkup(row_width=1)
-        buttons.add(
-            button_attach_messages(task_id),
-            button_update_assigned_to(task_id),
-            button_my_tasks()
-        )
+        buttons = task_bottom_buttons(task=None, task_id=task_id)
         send("<i>{emoji} Task created:</i> /t{task_id}".format(emoji=EMOJI_NEW_TASK, task_id=task_id),
              buttons)
+        # It's important to update activity first, because second message in a
+        # batch can be proceeded by another process, so we have to update activity ASAP.
+        # Though, there is no gurantee that this process will do it faster.
+        # A strong solution is avoiding concurency via Lambda config "Reserve concurrency = 1"
+        # OR by making FIFO queue per user
+        # OR using lock in user activity
+        user_activity.activity = User.ACTIVITY_NEW_TASK
+        user_activity.task_id = task_id
+        user_activity.telegram_unixtime = message.get('date')
+        user_activity.update_activity_task_time()
+
         task = Task(task_id, user_id=user['id'])
         task.add_message(message)
         task.description = message2description(message)
         task.telegram_unixtime = message.get('date')
         task.update()
-        user_activity.activity = User.ACTIVITY_NEW_TASK
-        user_activity.task_id = task_id
-        user_activity.telegram_unixtime = message.get('date')
-        user_activity.update_activity_task_time()
     return RESPONSE_200
 
 
@@ -215,9 +239,12 @@ def handle_callback():
     user_activity = None
     # actions without activity
     if action == ACTION_UPDATE_TASK_STATE:
+        # TODO: update buttons where is was clicked
         com_update_task_state(task_id, callback['task_state'])
     elif action == ACTION_MY_TASKS:
         com_tasks(header='<b>My Tasks</b>', reply=False)
+    elif action == ACTION_TASKS_FROM_ME:
+        com_tasks(to_me=False, header='<b>Tasks From Me</b>', reply=False)
     elif action == ACTION_TASK:
         com_print_task(task_id)
     else:
@@ -255,7 +282,6 @@ def com_update_description(user_activity, task_id):
     user_activity.task_id = task_id
     user_activity.update_activity_and_task()
 
-
 def com_update_task_state(task_id, task_state):
     task = Task.load_by_id(task_id)
     if user['id'] in [task.from_id, task.to_id]:
@@ -263,25 +289,15 @@ def com_update_task_state(task_id, task_state):
         send(reply_text)
         task.task_state = task_state
         task.update_task_state()
-        another_user_id = None
-        if user['id'] != task.from_id:
-            another_user_id = task.from_id
-        elif user['id'] != task.to_id:
-            another_user_id = task.to_id
 
-        if another_user_id:
-            another_user_activity = User.load_by_id(another_user_id)
-            if another_user_activity.chat_id:
-                reply_text = '<b>UPDATE from</b> %s for /t%s\n\n%s' % (user2link(user), task_id, reply_text)
-                buttons = InlineKeyboardMarkup(row_width=1)
-                buttons.add(button_my_tasks())
-
-                bot.send_message(
-                    another_user_activity.chat_id,
-                    reply_text,
-                    parse_mode='HTML',
-                    reply_markup=buttons
-                )
+        notify_another_user(
+            task,
+            '<b>%s Task State is changed by</b> %s\n\n%s' % (
+                EMOJI_NEW_STATE_FROM_ANOTHER,
+                user2link(user),
+                escape_html(task.description)
+            )
+        )
     else:
         send(NOT_FOUND_MESSAGE)
 
@@ -334,10 +350,11 @@ def com_tasks(to_me=True, header=None, reply=True):
         # buttons = InlineKeyboardMarkup(row_width=1)
         # buttons.add(button_task(task, user_id))
         reply_text = '%s\n\n%s' % (
-            task.description,
+            escape_html(task.description),
             task_summary(task, user_id)
         )
-        send(reply_text, reply=False)
+        reply_markup = task_state_keyboard(task, row_width=4)
+        send(reply_text, reply=False, reply_markup=reply_markup)
         not_found = False
 
     if not_found:
@@ -352,13 +369,12 @@ def com_print_task(task_id, check_rights=True):
         bot.send_message(chat['id'], NOT_FOUND_MESSAGE, parse_mode='HTML', reply_markup=ReplyKeyboardRemove())
         return False
 
-    header = task.description
+    header = escape_html(task.description)
     header += '\n\n'
     header += task_summary(task, user_id)
     buttons = InlineKeyboardMarkup(row_width=2)
     buttons.add(
         button_update_description(task_id),
-        button_update_assigned_to(task_id)
     )
 
     bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=buttons)
@@ -369,29 +385,46 @@ def com_print_task(task_id, check_rights=True):
             message_id=msg_id,
         )
 
-    buttons = InlineKeyboardMarkup(row_width=2)
-    buttons.add(
-        *[InlineKeyboardButton(
-            mark_state(TASK_STATE_TO_HTML[task_state], task_state, task.task_state),
-            callback_data=encode_callback(ACTION_UPDATE_TASK_STATE, task_state=task_state, task_id=task_id)
-        ) for task_state in [
-            TASK_STATE_TODO,
-            TASK_STATE_DONE,
-            TASK_STATE_WAITING,
-            TASK_STATE_CANCELED,
-        ]
-        ])
-    buttons.row_width = 1
-    buttons.add(
-        button_attach_messages(task_id),
-        button_my_tasks()
-    )
+    buttons = task_bottom_buttons(task)
     bot.send_message(chat['id'], "/t{task_id}".format(task_id=task_id), reply_markup=buttons, parse_mode='HTML')
 
 
 #########################
 # Buttons and Keyboards #
 #########################
+def task_bottom_buttons(task=None, task_id=None):
+    task_id = task_id or task.id
+    buttons = task_state_keyboard(task=task, task_id=task_id)
+    buttons.row_width = 2
+    buttons.add(
+        button_update_assigned_to(task_id),
+        button_attach_messages(task_id),
+    )
+    buttons.row_width = 1
+    buttons.add(
+        button_my_tasks()
+    )
+    return buttons
+
+
+def task_state_keyboard(task, task_id=None, row_width=4):
+    task_state = task and task.task_state or TASK_STATE_TODO
+    task_id = task_id or task.id
+    buttons = InlineKeyboardMarkup(row_width=row_width)
+    buttons.add(
+        *[InlineKeyboardButton(
+            mark_state(TASK_STATE_TO_HTML[ts], ts, task_state),
+            callback_data=encode_callback(ACTION_UPDATE_TASK_STATE, task_state=ts, task_id=task_id)
+        ) for ts in [
+            TASK_STATE_TODO,
+            TASK_STATE_DONE,
+            TASK_STATE_WAITING,
+            TASK_STATE_CANCELED,
+        ]
+        ])
+    return buttons
+
+
 def assign_keyboard():
     reply_markup = ReplyKeyboardMarkup(row_width=3)
     reply_markup.add(
@@ -430,6 +463,13 @@ def button_my_tasks():
     )
 
 
+def button_tasks_from_me():
+    return InlineKeyboardButton(
+        '{emoji} Tasks From Me {emoji}'.format(emoji=EMOJI_TASKS_FROM_ME),
+        callback_data=encode_callback(ACTION_TASKS_FROM_ME)
+    )
+
+
 def button_stop_attaching():
     return InlineKeyboardButton(
         '{emoji} Stop Attaching {emoji}'.format(emoji=EMOJI_STOP_ATTACHING),
@@ -444,9 +484,9 @@ def button_cancel():
     )
 
 
-def button_task(task, user_id):
+def button_task(task, user_id, html=True):
     return InlineKeyboardButton(
-        task_summary(task, user_id),
+        task_summary(task, user_id, html),
         callback_data=encode_callback(ACTION_TASK, task.id),
     )
 
@@ -461,7 +501,7 @@ TO_INDEX = 'to_id-task_state-index'
 
 # READ environment variables
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-USERS = os.environ.get('USERS')
+USERS = os.environ.get('USERS', '{}')
 if USERS:
     USERS = dict(json.loads(USERS))
 DYNAMODB_TABLE_TASK = os.environ.get('DYNAMODB_TABLE_TASK')
@@ -521,14 +561,19 @@ EMOJI_ATTACH_MESSAGES = EMOJI_AUTO_ATTACHED_MESSAGE
 EMOJI_ATTACHED_MESSAGE = EMOJI_AUTO_ATTACHED_MESSAGE
 EMOJI_ATTACHING_STOPPED = u'\U0001f44d'  # Thumbup
 EMOJI_SEND_MESSAGE_TO_ATTACH = u'\u2709' + EMOJI_AUTO_ATTACHED_MESSAGE  # envelope + puzzle
-EMOJI_NEW_TASK = u'\U0001f44d'  # emoji.emojize(':thumbsup:', use_aliases=True)
+EMOJI_NEW_TASK = u'\U0001f609'  # emoji.emojize(':wink:', use_aliases=True)
 EMOJI_SEPARATOR_MY_TASKS = u'\U0001f68b' * 10  # emoji.emojize(':train:', use_aliases=True)
 EMOJI_UPDATE_DESCRIPTION = u'\U0001f4d6'  # emoji.emojize(u":book:", use_aliases=True)
 EMOJI_UPDATE_ASSIGNED_TO = u'\U0001f920'  # emoji.emojize(u"🤠", use_aliases=True)
 EMOJI_MY_TASKS = u'\u2b50'  # emoji.emojize(u":star:", use_aliases=True)
+EMOJI_TASKS_FROM_ME = EMOJI_TASK_TO
 EMOJI_STOP_ATTACHING = u'\U0001f44c'  # emoji.emojize(u":ok_hand:", use_aliases=True)
 EMOJI_CANCEL_ACTION = u'\u270b'  # emoji.emojize(u":raised_hand:", use_aliases=True)
 EMOJI_TIME = u'\U0001f550'  # emoji.emojize(u":clock1:", use_aliases=True)
+EMOJI_NEW_TASK_FROM_ANOTHER = u'\U0001f381'  # emoji.emojize(u":gift:", use_aliases=True)
+EMOJI_NEW_STATE_FROM_ANOTHER = u'\U0001f60d'  # emoji.emojize(u":heart_eyes:", use_aliases=True)
+EMOJI_NEW_DESCRIPTION_FROM_ANOTHER = u'\U0001f914'  # thinking
+
 
 TASK_STATE_TO_HTML = {
     TASK_STATE_TODO: "%s To-Do" % EMOJI_TODO,
@@ -546,13 +591,44 @@ def send(reply_text, reply_markup=None, reply=True):
     bot.send_message(chat['id'], reply_text, reply_to_message_id=reply and message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
 
 
+def notify_another_user(task, reply_text):
+    another_user_id = None
+    if user['id'] != task.from_id:
+        another_user_id = task.from_id
+    elif user['id'] != task.to_id:
+        another_user_id = task.to_id
+
+    if not another_user_id:
+        return
+
+    another_user_activity = User.load_by_id(another_user_id)
+    if not another_user_activity.chat_id:
+        return
+
+    buttons = InlineKeyboardMarkup(row_width=1)
+    buttons.add(button_task(task, another_user_id, html=False))
+    buttons.add(button_tasks_from_me())
+    buttons.add(button_my_tasks())
+
+    bot.send_message(
+        another_user_activity.chat_id,
+        reply_text,
+        parse_mode='HTML',
+        reply_markup=buttons
+    )
+
+
+def escape_html(text):
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
 ################
 # Text Helpers #
 ################
 def mark_state(state_html, state, current_state):
     if state != current_state:
         return state_html
-    return state_html.upper() + '*'
+    return '*' + state_html.upper()
 
 
 def get_command_and_text(text):
@@ -608,18 +684,31 @@ def message2description(message):
     return description
 
 
-def task_summary(task, user_id):
-    state = '<i>%s</i>' % TASK_STATE_TO_HTML[task.task_state]
+def task_summary(task, user_id, html=True):
+    def wrap(text):
+        if not html:
+            return text
+        return '<i>%s</i>' % text
 
+    state = '%s' % TASK_STATE_TO_HTML[task.task_state]
+    state = wrap(state)
     another_user = ''
     if user_id != task.from_id:
-        another_user = '%s <i>%s</i>' % (EMOJI_TASK_FROM, user_id2name(task.from_id))
+        another_user = '%s %s' % (EMOJI_TASK_FROM, user_id2name(task.from_id))
     elif user_id != task.to_id:
-        another_user = '%s <i>%s</i>' % (EMOJI_TASK_TO, user_id2name(task.to_id))
-    time = '%s <i>%s</i>' % (EMOJI_TIME, pretty_date(task.telegram_unixtime)) if task.telegram_unixtime else ''
+        another_user = '%s %s' % (EMOJI_TASK_TO, user_id2name(task.to_id))
+    if another_user:
+        another_user = wrap(another_user)
+    time = '%s %s' % (EMOJI_TIME, pretty_date(task.telegram_unixtime)) if task.telegram_unixtime else ''
+    time = wrap(time)
     task_command = '/t%s' % task.id
 
-    summary = ' '.join([t for t in [state, time, another_user, task_command] if t])
+    summary = ' '.join([t for t in [
+        state,
+        time,
+        another_user,
+        task_command
+    ] if t])
     return summary
 
 
@@ -678,10 +767,11 @@ ACTION_ATTACH_MESSAGES = 'am'
 ACTION_TASK = 'at'
 
 ACTION_MY_TASKS = 'mt'
+ACTION_TASKS_FROM_ME = 'tfm'
 ACTION_STOP = 's'
 ACTION_CANCEL = 'c'
 
-ACTIONS_WITHOUT_DATA = [ACTION_MY_TASKS, ACTION_STOP, ACTION_CANCEL]
+ACTIONS_WITHOUT_DATA = [ACTION_MY_TASKS, ACTION_STOP, ACTION_CANCEL, ACTION_TASKS_FROM_ME]
 # ACTIONS_WITH_TASK = [ACTION_UPDATE_DESCRIPTION, ACTION_UPDATE_ASSIGNED_TO, ACTION_ATTACH_MESSAGES]
 
 
@@ -731,7 +821,7 @@ class DynamodbItem(object):
 
     # Reading
     @classmethod
-    def load_by_id(cls, id):
+    def load_by_id(cls, id, raise_if_not_found=False):
         res = dynamodb.get_item(
             TableName=cls.TABLE,
             Key={
@@ -739,8 +829,11 @@ class DynamodbItem(object):
             }
         )
         if not res.get('Item'):
-            # New Item
-            return cls(id)
+            if raise_if_not_found:
+                raise Exception("Attempt for loading unexisting record: %s")
+            else:
+                # New Item
+                return cls(id)
         return cls.load_from_dict(res['Item'])
 
     @classmethod
@@ -781,7 +874,7 @@ class DynamodbItem(object):
         return dynamodb.update_item(
             TableName=self.TABLE,
             Key={
-                self.PARTITION_KEY: Task.elem_to_num(getattr(self, self.PARTITION_KEY))
+                self.PARTITION_KEY: DynamodbItem.elem_to_num(getattr(self, self.PARTITION_KEY))
             },
             AttributeUpdates=AttributeUpdates,
         )
@@ -803,7 +896,7 @@ class DynamodbItem(object):
             return self._update(AttributeUpdates)
 
 
-# DYNAMODB_TABLE_TASK
+# DYNAMODB_TABLE_USER
 # Task structure:
 #
 # {
@@ -901,7 +994,7 @@ class Task(DynamodbItem):
         self.from_id = user_id
         self.to_id = user_id
         self.telegram_unixtime = 0
-        self.description = '<i>New Task</i>'
+        self.description = '*New Task*'
         self.messages = []
 
     # Preparing

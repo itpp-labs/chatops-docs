@@ -196,6 +196,16 @@ for lambda (created automatically somehow)
         ]
     }
 
+Timeout
+~~~~~~~
+
+Execution time depends on telegram server and amount of requests there. So, think about 30 seconds for limit.
+
+Concurrency
+~~~~~~~~~~~
+
+You may need to disable concurrency (i.e. set **Reserve concurrency** to value **1**) as a workaround for following issue: on resending batch of messages, those might be processed by several workers, so you might get several messages instead of a single one.
+
 Register webhook at telegram
 ----------------------------
 
