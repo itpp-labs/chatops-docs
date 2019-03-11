@@ -149,12 +149,7 @@ def lambda_handler(event, context):
     else:
         # Just create new task
         task_id = update['update_id'] - MIN_UPDATE_ID
-        buttons = InlineKeyboardMarkup(row_width=1)
-        buttons.add(
-            button_attach_messages(task_id),
-            button_update_assigned_to(task_id),
-            button_my_tasks()
-        )
+        buttons = task_bottom_buttons(task=None, task_id=task_id)
         send("<i>{emoji} Task created:</i> /t{task_id}".format(emoji=EMOJI_NEW_TASK, task_id=task_id),
              buttons)
         # It's important to update activity first, because second message in a
@@ -380,7 +375,6 @@ def com_print_task(task_id, check_rights=True):
     buttons = InlineKeyboardMarkup(row_width=2)
     buttons.add(
         button_update_description(task_id),
-        button_update_assigned_to(task_id)
     )
 
     bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=buttons)
@@ -391,25 +385,37 @@ def com_print_task(task_id, check_rights=True):
             message_id=msg_id,
         )
 
-    buttons = task_state_keyboard(task)
-    buttons.row_width = 1
-    buttons.add(
-        button_attach_messages(task_id),
-        button_my_tasks()
-    )
+    buttons = task_bottom_buttons(task)
     bot.send_message(chat['id'], "/t{task_id}".format(task_id=task_id), reply_markup=buttons, parse_mode='HTML')
 
 
 #########################
 # Buttons and Keyboards #
 #########################
-def task_state_keyboard(task, row_width=4):
+def task_bottom_buttons(task=None, task_id=None):
+    task_id = task_id or task.id
+    buttons = task_state_keyboard(task=task, task_id=task_id)
+    buttons.row_width = 2
+    buttons.add(
+        button_update_assigned_to(task_id),
+        button_attach_messages(task_id),
+    )
+    buttons.row_width = 1
+    buttons.add(
+        button_my_tasks()
+    )
+    return buttons
+
+
+def task_state_keyboard(task, task_id=None, row_width=4):
+    task_state = task and task.task_state or TASK_STATE_TODO
+    task_id = task_id or task.id
     buttons = InlineKeyboardMarkup(row_width=row_width)
     buttons.add(
         *[InlineKeyboardButton(
-            mark_state(TASK_STATE_TO_HTML[task_state], task_state, task.task_state),
-            callback_data=encode_callback(ACTION_UPDATE_TASK_STATE, task_state=task_state, task_id=task.id)
-        ) for task_state in [
+            mark_state(TASK_STATE_TO_HTML[ts], ts, task_state),
+            callback_data=encode_callback(ACTION_UPDATE_TASK_STATE, task_state=ts, task_id=task_id)
+        ) for ts in [
             TASK_STATE_TODO,
             TASK_STATE_DONE,
             TASK_STATE_WAITING,
