@@ -78,14 +78,14 @@ Add Secondary index:
 * *Partition key:* ``from_id`` (number)
 * *Sort key:*  ``task_state`` (number)
 * *Index name:* ``from_id-task_state-index``
-* *Projected attributes:* ``Include`` -- then add field ``to_id``, ``description``, ``telegram_unixtime``
+* *Projected attributes:* ``Include`` -- then add field ``to_id``, ``description``, ``telegram_unixtime``, ``msg_num``
 
 Add another Secondary index:
 
 * *Partition key:* ``to_id`` (number)
 * *Sort key:*  ``task_state`` (number)
 * *Index name:* ``to_id-task_state-index``
-* *Projected attributes:* ``Include`` -- then add field ``from_id``, ``description``, ``telegram_unixtime``
+* *Projected attributes:* ``Include`` -- then add field ``from_id``, ``description``, ``telegram_unixtime``, ``msg_num``
 
 Users table
 ~~~~~~~~~~~

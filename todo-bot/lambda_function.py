@@ -702,12 +702,17 @@ def task_summary(task, user_id, html=True):
     time = '%s %s' % (EMOJI_TIME, pretty_date(task.telegram_unixtime)) if task.telegram_unixtime else ''
     time = wrap(time)
     task_command = '/t%s' % task.id
+    msg_num = ''
+    if task.msg_num and task.msg_num > 1:
+        msg_num = "\n%s attached messages" % task.msg_num
+        msg_num = wrap(msg_num)
 
     summary = ' '.join([t for t in [
         state,
         time,
         another_user,
-        task_command
+        task_command,
+        msg_num,
     ] if t])
     return summary
 
@@ -984,7 +989,7 @@ class User(DynamodbItem):
 
 class Task(DynamodbItem):
     STR_PARAMS = ['description']
-    INT_PARAMS = ['id', 'from_id', 'to_id', 'task_state', 'telegram_unixtime']
+    INT_PARAMS = ['id', 'from_id', 'to_id', 'task_state', 'telegram_unixtime', 'msg_num']
     CHAT_MSG_PARAMS = ['messages']
     TABLE = DYNAMODB_TABLE_TASK
 
@@ -994,6 +999,7 @@ class Task(DynamodbItem):
         self.from_id = user_id
         self.to_id = user_id
         self.telegram_unixtime = 0
+        self.msg_num = 0
         self.description = '*New Task*'
         self.messages = []
 
@@ -1005,6 +1011,7 @@ class Task(DynamodbItem):
 
     def add_message(self, message):
         self.messages.append(self._message2tuple(message))
+        self.msg_num += 1
 
     # Reading
     @classmethod
@@ -1081,6 +1088,10 @@ class Task(DynamodbItem):
         AttributeUpdates = {}
         AttributeUpdates['messages'] = {
             'Value': self._dump_messages(array),
+            'Action': 'ADD',
+        }
+        AttributeUpdates['msg_num'] = {
+            'Value': self.elem_to_num(1),
             'Action': 'ADD',
         }
         return self._update(AttributeUpdates)
