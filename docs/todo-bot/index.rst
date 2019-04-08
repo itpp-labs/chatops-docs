@@ -111,10 +111,10 @@ Environment variables
    * Install python lib: https://pypi.python.org/pypi/emoji
    * Prepare json in python console::
 
-     import emoji
-     import json
-     d = {"123": ":thumbsup: Ivan"}
-     print(json.dumps(dict([(k, emoji.emojize(v, use_aliases=True)) for k, v in d.items()])))
+         import emoji
+         import json
+         d = {"123": ":thumbsup: Ivan"}
+         print(json.dumps(dict([(k, emoji.emojize(v, use_aliases=True)) for k, v in d.items()])))
 
 
 * ``DYNAMODB_TABLE_TASK`` -- table with tasks
