@@ -418,7 +418,7 @@ def task_state_keyboard(task, task_id=None, row_width=4):
         ) for ts in [
             TASK_STATE_TODO,
             TASK_STATE_DONE,
-            TASK_STATE_WAITING,
+            TASK_STATE_RELOCATED,
             TASK_STATE_CANCELED,
         ]
         ])
@@ -543,7 +543,7 @@ MEDIA2DESCRIPTION = [
 
 
 TASK_STATE_TODO = 0
-TASK_STATE_WAITING = 1
+TASK_STATE_RELOCATED = 1
 TASK_STATE_DONE = 2
 TASK_STATE_CANCELED = 3
 
@@ -551,7 +551,7 @@ TASK_STATE_CANCELED = 3
 # http://www.webpagefx.com/tools/emoji-cheat-sheet/
 # and https://pypi.python.org/pypi/emoji
 EMOJI_TODO = u'\U0001f4dd'  # emoji.emojize(':memo:', use_aliases=True)
-EMOJI_WAITING = u'\U0001f4a4'  # emoji.emojize(':zzz:', use_aliases=True)
+EMOJI_RELOCATED = u'\U0001f618'  # kissing
 EMOJI_DONE = u'\u2705'  # emoji.emojize(':white_check_mark:', use_aliases=True)
 EMOJI_CANCELED = u'\u274c'  # emoji.emojize(':x:', use_aliases=True)
 EMOJI_TASK_TO = u'\u27a1'  # emoji.emojize(':arrow_right:', use_aliases=True)
@@ -577,7 +577,7 @@ EMOJI_NEW_DESCRIPTION_FROM_ANOTHER = u'\U0001f914'  # thinking
 
 TASK_STATE_TO_HTML = {
     TASK_STATE_TODO: "%s To-Do" % EMOJI_TODO,
-    TASK_STATE_WAITING: "%s Waiting" % EMOJI_WAITING,
+    TASK_STATE_RELOCATED: "%s Relocated" % EMOJI_RELOCATED,
     TASK_STATE_DONE: "%s Done" % EMOJI_DONE,
     TASK_STATE_CANCELED: "%s Canceled" % EMOJI_CANCELED,
 }
@@ -976,7 +976,7 @@ class User(DynamodbItem):
 #   "to_id": USER_ID, // assigned to
 #
 #   // SECONDARY KEY (sort)
-#   "task_state": STATE, // STATE: O=TODO, 1=WAITING, 2=DONE, 3=CANCELED
+#   "task_state": STATE, // STATE: O=TODO, 1=RELOCATED, 2=DONE, 3=CANCELED
 #
 #   // Projected keys
 #   "description": "Short representation of the TODO",
