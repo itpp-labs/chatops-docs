@@ -17,6 +17,10 @@ def lambda_handler(event, context):
     global user
     logger.debug("Event: \n%s", json.dumps(event))
     logger.debug("Context: \n%s", context)
+    # Check for cron
+    if event.get("source") == "aws.events":
+        return handle_cron(event)
+
     # READ webhook data
 
     # Object Update in json format.
@@ -167,6 +171,7 @@ def lambda_handler(event, context):
         task.add_message(message)
         task.description = message2description(message)
         task.telegram_unixtime = message.get('date')
+        task.next_reminder = message.get('date') + 24 * 3600 * REMINDER_DAYS
         task.update()
     return RESPONSE_200
 
@@ -260,6 +265,55 @@ def handle_callback():
         cancel = action == ACTION_CANCEL
         com_cancel(user_activity, cancel, reply=False)
 
+    return RESPONSE_200
+
+
+def handle_cron(event):
+    # Time example "2019-04-16T09:45:07Z"
+    TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+    NOTIFICATION_TITLE = u'\u2757\ufe0f' + "There are some old tasks. Please, either <b>do</b> them, <b>relocate</b> somewhere or mark as <b>canceled</b>."
+    time = event['time']
+    dt = datetime.strptime(time, TIME_FORMAT)
+    unixtime = (dt - datetime(1970, 1, 1)).total_seconds()
+
+    for user_id, user_name in USERS.items():
+        user_tasks = Task.get_tasks_to_remind(user_id, unixtime)
+        has_tasks = list(user_tasks)
+        if has_tasks:
+            user_activity = User.load_by_id(user_id)
+            try:
+                bot.send_message(
+                    user_activity.chat_id,
+                    NOTIFICATION_TITLE,
+                    parse_mode='HTML',
+                )
+            except:
+                # chat not found?
+                continue
+
+        for task in user_tasks:
+            # FIXME: the code is copy-pasted
+            reply_text = '%s\n\n%s' % (
+                escape_html(task.description),
+                task_summary(task, user_id)
+            )
+            reply_markup = task_state_keyboard(task, row_width=4)
+            bot.send_message(
+                user_activity.chat_id,
+                reply_text,
+                parse_mode='HTML',
+                reply_markup=reply_markup
+            )
+
+            task.next_reminder = unixtime + 24 * 3600 * REMINDER_DAYS
+            task.update_next_reminder()
+
+        if has_tasks:
+            bot.send_message(
+                user_activity.chat_id,
+                NOTIFICATION_TITLE,
+                parse_mode='HTML',
+            )
     return RESPONSE_200
 
 
@@ -418,7 +472,7 @@ def task_state_keyboard(task, task_id=None, row_width=4):
         ) for ts in [
             TASK_STATE_TODO,
             TASK_STATE_DONE,
-            TASK_STATE_WAITING,
+            TASK_STATE_RELOCATED,
             TASK_STATE_CANCELED,
         ]
         ])
@@ -509,6 +563,7 @@ DYNAMODB_TABLE_USER = os.environ.get('DYNAMODB_TABLE_USER')
 LOG_LEVEL = os.environ.get('LOG_LEVEL')
 MIN_UPDATE_ID = int(os.environ.get('MIN_UPDATE_ID', 0))
 FORWARDING_DELAY = int(os.environ.get('FORWARDING_DELAY', 3))
+REMINDER_DAYS = int(os.environ.get('REMINDER_DAYS', 14))
 
 logger = logging.getLogger()
 if LOG_LEVEL:
@@ -543,7 +598,7 @@ MEDIA2DESCRIPTION = [
 
 
 TASK_STATE_TODO = 0
-TASK_STATE_WAITING = 1
+TASK_STATE_RELOCATED = 1
 TASK_STATE_DONE = 2
 TASK_STATE_CANCELED = 3
 
@@ -551,7 +606,7 @@ TASK_STATE_CANCELED = 3
 # http://www.webpagefx.com/tools/emoji-cheat-sheet/
 # and https://pypi.python.org/pypi/emoji
 EMOJI_TODO = u'\U0001f4dd'  # emoji.emojize(':memo:', use_aliases=True)
-EMOJI_WAITING = u'\U0001f4a4'  # emoji.emojize(':zzz:', use_aliases=True)
+EMOJI_RELOCATED = u'\U0001f618'  # kissing
 EMOJI_DONE = u'\u2705'  # emoji.emojize(':white_check_mark:', use_aliases=True)
 EMOJI_CANCELED = u'\u274c'  # emoji.emojize(':x:', use_aliases=True)
 EMOJI_TASK_TO = u'\u27a1'  # emoji.emojize(':arrow_right:', use_aliases=True)
@@ -577,7 +632,7 @@ EMOJI_NEW_DESCRIPTION_FROM_ANOTHER = u'\U0001f914'  # thinking
 
 TASK_STATE_TO_HTML = {
     TASK_STATE_TODO: "%s To-Do" % EMOJI_TODO,
-    TASK_STATE_WAITING: "%s Waiting" % EMOJI_WAITING,
+    TASK_STATE_RELOCATED: "%s Relocated" % EMOJI_RELOCATED,
     TASK_STATE_DONE: "%s Done" % EMOJI_DONE,
     TASK_STATE_CANCELED: "%s Canceled" % EMOJI_CANCELED,
 }
@@ -976,20 +1031,22 @@ class User(DynamodbItem):
 #   "to_id": USER_ID, // assigned to
 #
 #   // SECONDARY KEY (sort)
-#   "task_state": STATE, // STATE: O=TODO, 1=WAITING, 2=DONE, 3=CANCELED
+#   "task_state": STATE, // STATE: O=TODO, 1=RELOCATED, 2=DONE, 3=CANCELED
 #
 #   // Projected keys
 #   "description": "Short representation of the TODO",
 #   "telegram_unixtime": CREATION_TIMESTAMP,
 #
 #   // Normal keys
+#   "msg_num": INTEGER,
+#   "next_reminder": UNIXTIME,
 #   "messages": [CHAT_ID + '_' + MESSAGE_ID],
 # }
 
 
 class Task(DynamodbItem):
     STR_PARAMS = ['description']
-    INT_PARAMS = ['id', 'from_id', 'to_id', 'task_state', 'telegram_unixtime', 'msg_num']
+    INT_PARAMS = ['id', 'from_id', 'to_id', 'task_state', 'telegram_unixtime', 'msg_num', 'next_reminder']
     CHAT_MSG_PARAMS = ['messages']
     TABLE = DYNAMODB_TABLE_TASK
 
@@ -1061,6 +1118,29 @@ class Task(DynamodbItem):
 
         return (cls.load_from_dict(task_dict) for task_dict in result['Items'])
 
+    @classmethod
+    def get_tasks_to_remind(cls, user_id, unixtime_now):
+        # Doc: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/dynamodb.html#DynamoDB.Client.query
+        condition = "to_id = :user_id and task_state = :task_state"
+        filter_expression = "attribute_not_exists(next_reminder) or next_reminder < :unixtime_now"
+        args = {
+            ':user_id': Task.elem_to_num(user_id),
+            ':task_state': Task.elem_to_num(TASK_STATE_TODO),
+            ':unixtime_now': Task.elem_to_num(unixtime_now),
+        }
+        query_kwargs = dict(
+            TableName=cls.TABLE,
+            IndexName=TO_INDEX,
+            Select='ALL_PROJECTED_ATTRIBUTES',
+            KeyConditionExpression=condition,
+            ExpressionAttributeValues=args,
+            FilterExpression=filter_expression
+        )
+
+        result = dynamodb.query(**query_kwargs)
+
+        return (cls.load_from_dict(task_dict) for task_dict in result['Items'])
+
     # Writing
     @classmethod
     def _dump_messages(self, array):
@@ -1082,6 +1162,9 @@ class Task(DynamodbItem):
 
     def update_assigned_to(self):
         return self.update('to_id')
+
+    def update_next_reminder(self):
+        return self.update('next_reminder')
 
     def add_and_update_messages(self, message):
         array = [self._message2tuple(message)]
