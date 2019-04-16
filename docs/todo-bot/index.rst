@@ -85,7 +85,7 @@ Add another Secondary index:
 * *Partition key:* ``to_id`` (number)
 * *Sort key:*  ``task_state`` (number)
 * *Index name:* ``to_id-task_state-index``
-* *Projected attributes:* ``Include`` -- then add field ``from_id``, ``description``, ``telegram_unixtime``, ``msg_num``
+* *Projected attributes:* ``Include`` -- then add field ``from_id``, ``description``, ``telegram_unixtime``, ``msg_num``, ``next_reminder``
 
 Users table
 ~~~~~~~~~~~
@@ -124,12 +124,17 @@ Environment variables
 * ``FORWARDING_DELAY`` -- max seconds to wait for next forwarded message. It's a
   workaround for limitation of telegram API -- it sends forwarded messages one
   by one and never in a single event. Default is 3 sec.
+* ``REMINDER_DAYS`` -- how much days to wait before remind a user about open task
 
 
 Trigger
 ~~~~~~~
 
-User ``API Gateway``. Once you configure it and save, you will see ``Invoke URL`` under Atpi Gateway **details** section
+* **API Gateway**. Once you configure it and save, you will see ``Invoke URL`` under Api Gateway **details** section
+* **CloudWatch Events**. Create new rule for reminders, for example set
+
+  * *Rule name* -- ``boto-todo-reminder``
+  * *Schedule expression* -- ``rate(1 day)``
 
 Role
 ~~~~
