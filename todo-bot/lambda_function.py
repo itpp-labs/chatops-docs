@@ -278,7 +278,7 @@ def handle_cron(event):
 
     for user_id, user_name in USERS.items():
         user_tasks = Task.get_tasks_to_remind(user_id, unixtime)
-        has_tasks = list(user_tasks)
+        has_tasks = len(list(user_tasks))
         if has_tasks:
             user_activity = User.load_by_id(user_id)
             try:
