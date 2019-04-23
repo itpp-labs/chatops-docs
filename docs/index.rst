@@ -5,8 +5,10 @@
 
 Welcome to ChatOps's documentation!
 ===================================
+22.04.2019
 
 .. toctree::
    :maxdepth: 2
 
    todo-bot/index
+   resend-bot/index
