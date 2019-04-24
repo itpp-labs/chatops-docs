@@ -20,6 +20,7 @@ TODO: text formatting is lost on resending. Use [entities](https://core.telegram
 
 TODO: set debug level via Environment variables
 
+TODO: bots send empty messages, when someone left the group.
 
 
 
@@ -32,9 +33,9 @@ Chat ID
 
 Send message
 ------------	
-The are following ways for sending *message-reqest* to the Bot:
+The are following ways for sending *message-reqest* to the bot:
 
-* In **private chat** with the Bot: any message 
+* In **private chat** with the bot: any message 
   * e.g. *hello, how are you?, etc*
 * In **another** Telegram group (different from *Target group*): any message that starts with `/` and ends with `@<name_of_the_>bot` is used as a response to the Bot's message
   * e.g. `/hey@super_bot`, `/please@request_bot`, etc. 
@@ -45,7 +46,7 @@ The *Target group* receives a copy of the message with a reference to the sender
 
 Response
 --------
-Users response to the Bot, in so doing: 
+Users response to the bot, in so doing: 
  * The copy of the response is sent back to chat, which contains the original message. 
  * Response from *Target group* is anonymous by default, but could be customized.
 
@@ -67,12 +68,12 @@ Deployment
 
 Create a bot
 ------------
-https://telegram.me/botfather -- follow instruction to set bot name and get bot token
+https://telegram.me/botfather -- follow instruction to set bot name and get bot token.
 
 Check your steps:
-* Use the /newbot command to create a new Bot first.
-* The name of the Bot must be end witn "bot" (e.g. TetrisBot or tetris_bot).
-* Keep your token secure and store safely, it can be used by anyone to control your Bot. 
+* Use the /newbot command to create a new bot first.
+* The name of the bot must be end witn "bot" (e.g. TetrisBot or tetris_bot).
+* Keep your token secure and store safely, it can be used by anyone to control your bot. 
 
 Prepare zip file
 ----------------
@@ -82,7 +83,7 @@ To make `deployment package <https://docs.aws.amazon.com/lambda/latest/dg/lambda
     cd /tmp/resend-bot
 
     pip2 install pyTelegramBotAPI -t .
-    wget https://gitlab.com/itpp/chatops/raw/master/todo-bot/lambda_function.py -O lambda_function.py
+    wget https://gitlab.com/itpp/chatops/raw/master/resend-bot/lambda_function.py -O lambda_function.py
     zip -r /tmp/resend_bot_package.zip *
 
 Create Lambda function
@@ -110,8 +111,8 @@ Trigger
 
 Register webhook at telegram
 ----------------------------
-* Replace <BOT_TOKEN> with your Telegram HTTP API access token.
-* Replace <WEB_HOOK> with your Invoke URL obtained in the previous section.
+* Replace "PASTETHETOKEN" with your Telegram HTTP API access token.
+* Replace "PASTEAWSWEBHOOK" with your Invoke URL obtained in the previous section.
 * Run following command
 
 
