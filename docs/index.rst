@@ -10,3 +10,4 @@ Welcome to ChatOps's documentation!
    :maxdepth: 2
 
    todo-bot/index
+   resend-bot/index
