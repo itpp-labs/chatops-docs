@@ -43,6 +43,13 @@ To create new task:
 * Forward message to the bot
 * Assign to a user from the list
 
+Roadmap
+=======
+
+On changing task status:
+
+* Don't send a message, but update existing message with the task
+* Don't send notification to another user, if status was not changed (user clicked button with the same status)
 Deployment
 ==========
 
