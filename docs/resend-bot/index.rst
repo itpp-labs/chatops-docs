@@ -36,8 +36,10 @@ Send message
 The are following ways for sending *message-reqest* to the bot:
 
 * In **private chat** with the bot: any message 
+
   * e.g. *hello, how are you?, etc*
 * In **another** Telegram group (different from *Target group*): any message that starts with `/` and ends with `@<name_of_the_>bot` is used as a response to the Bot's message
+
   * e.g. `/hey@super_bot`, `/please@request_bot`, etc. 
 
 Get message
@@ -71,6 +73,7 @@ Create a bot
 https://telegram.me/botfather -- follow instruction to set bot name and get bot token.
 
 Check your steps:
+
 * Use the /newbot command to create a new bot first.
 * The name of the bot must be end witn "bot" (e.g. TetrisBot or tetris_bot).
 * Keep your token secure and store safely, it can be used by anyone to control your bot. 
@@ -98,7 +101,8 @@ Environment variables
 ~~~~~~~~~~~~~~~~~~~~~
 * ``BOT_TOKEN`` -- the one you got from BotFather
 * ``TARGET_GROUP`` -- put here Chat ID from the Target group using ``/thischat`` command 
-	*Note: ID number may contains the "-" before number
+
+  * Note: ID number may contains the "-" before number
 * ``ANONYMOUS_REPLY`` -- whether to send replies anonymously. Default True.
 * ``AANONYMOUS_REQUEST_FROM_GROUPS`` -- whether to show author name on requesting from another group. Default True.
 
