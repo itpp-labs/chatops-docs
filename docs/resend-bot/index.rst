@@ -22,6 +22,8 @@ TODO: set debug level via Environment variables
 
 TODO: bots send empty messages, when someone left the group.
 
+TODO: make it possible to restrict who can use the bot
+
 
 
 Technical specification
