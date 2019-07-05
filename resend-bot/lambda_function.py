@@ -7,7 +7,7 @@ import re
 
 logger = logging.getLogger()
 
-#___TODO#2 Debug level as environment variable (DEBUG, WARNING, ERROR, CRITICAL, INFO)
+# Set Debug level as environment variable (DEBUG, WARNING, ERROR, CRITICAL, INFO)
 
 if os.environ.get('LOGGING_LEVEL') == 'DEBUG':
     logger.setLevel(logging.DEBUG)
@@ -43,7 +43,6 @@ def lambda_handler(event, context):
     TARGET_GROUP = int(os.environ.get('TARGET_GROUP', 0))
     ANONYMOUS_REPLY = os.environ.get('ANONYMOUS_REPLY') != 'False'
     ANONYMOUS_REQUEST_FROM_GROUPS = os.environ.get('ANONYMOUS_REQUEST_FROM_GROUPS') != 'False'
-    #___TODO_4
     ACCESS_BOT_LIST = [int(id.strip(' ')) for id in os.environ['ACCESS_BOT_LIST'].split(',')]
 
     # PARSE
@@ -56,12 +55,12 @@ def lambda_handler(event, context):
     # Only work with disabled threaded mode. See https://github.com/eternnoir/pyTelegramBotAPI/issues/161#issuecomment-343873014
     bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
-    #___TODO4
+    #Handle if user has an access to bot
     if user['id'] not in ACCESS_BOT_LIST:
         bot.send_message(chat['id'], "<b>YOU SHALL NOT PASS!</b>", parse_mode='HTML')
         return RESPONSE_200
 
-    #___TODO_1
+    #Function, that returns a string with html-markups according to entities in message
     def get_formatted_text(text,entys):
             i_uf_st = 0 #notformatted start index
             i_uf_end =0 #nonformatted end index
@@ -80,6 +79,8 @@ def lambda_handler(event, context):
                     f_text += "<b>%s</b>" % (text[i_f_st:i_f_end])
                 elif ent['type'] == "italic":
                     f_text += "<i>%s</i>" % (text[i_f_st:i_f_end])
+                elif ent['type'] == "code":
+                    f_text += "<code>%s</code>" % (text[i_f_st:i_f_end])
                 else:
                     f_text += "%s" % (text[i_f_st:i_f_end])
 
@@ -124,7 +125,7 @@ def lambda_handler(event, context):
 
     if not main_text and not any(message.get(key) for key in MEDIA) and not message.get('photo'):
 
-        # ____TODO_3:
+        # Handling system 'Empty'-messages
         if (
             ('left_chat_member' in message) or
             ('new_chat_members' in message) or
@@ -151,12 +152,10 @@ def lambda_handler(event, context):
         from_group = '<em>from</em> <b>%s</b>' % from_group
 
 
-    #____TODO#1
+    #If there is entitis in message
 
     if 'entities' in message is not None:
         main_text = get_formatted_text(main_text,message['entities'])
-
-    #___TODO#1 END
 
 
     reply_text = "%s%s\n%s\n<i>msg:%s%s</i>" % (
