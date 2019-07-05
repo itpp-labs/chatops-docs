@@ -6,8 +6,20 @@ import re
 
 
 logger = logging.getLogger()
-# logger.setLevel(logging.DEBUG)
-logger.setLevel(logging.INFO)
+
+#___TODO#2 Debug level as environment variable (DEBUG, WARNING, ERROR, CRITICAL, INFO)
+
+if os.environ.get('LOGGING_LEVEL') == 'DEBUG':
+    logger.setLevel(logging.DEBUG)
+elif os.environ.get('LOGGING_LEVEL') == 'ERROR':
+    logger.setLevel(logging.ERROR)
+elif os.environ.get('LOGGING_LEVEL') == 'CRITICAL':
+    logger.setLevel(logging.CRITICAL)
+elif os.environ.get('LOGGING_LEVEL') == 'WARNING':
+    logger.setLevel(logging.WARNING)
+else:
+    logger.setLevel(logging.INFO)
+
 
 RESPONSE_200 = {
     "statusCode": 200,
@@ -31,6 +43,8 @@ def lambda_handler(event, context):
     TARGET_GROUP = int(os.environ.get('TARGET_GROUP', 0))
     ANONYMOUS_REPLY = os.environ.get('ANONYMOUS_REPLY') != 'False'
     ANONYMOUS_REQUEST_FROM_GROUPS = os.environ.get('ANONYMOUS_REQUEST_FROM_GROUPS') != 'False'
+    #___TODO_4
+    ACCESS_BOT_LIST = [int(id.strip(' ')) for id in os.environ['ACCESS_BOT_LIST'].split(',')]
 
     # PARSE
     message = update.get('message')
@@ -41,6 +55,38 @@ def lambda_handler(event, context):
     user = message.get('from')
     # Only work with disabled threaded mode. See https://github.com/eternnoir/pyTelegramBotAPI/issues/161#issuecomment-343873014
     bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
+
+    #___TODO4
+    if user['id'] not in ACCESS_BOT_LIST:
+        bot.send_message(chat['id'], "<b>YOU SHALL NOT PASS!</b>", parse_mode='HTML')
+        return RESPONSE_200
+
+    #___TODO_1
+    def get_formatted_text(text,entys):
+            i_uf_st = 0 #notformatted start index
+            i_uf_end =0 #nonformatted end index
+            f_text = ""
+            for ent in entys:
+                i_f_st =  ent['offset'] #formatted start index
+                i_f_end = ent['offset']+ent['length'] #formatted end index
+                i_uf_end = i_f_st
+
+                if i_uf_st != i_uf_end:
+                    f_text += "%s" % (text[i_uf_st:i_uf_end])
+
+                i_uf_st = i_f_end
+
+                if ent['type'] == "bold":
+                    f_text += "<b>%s</b>" % (text[i_f_st:i_f_end])
+                elif ent['type'] == "italic":
+                    f_text += "<i>%s</i>" % (text[i_f_st:i_f_end])
+                else:
+                    f_text += "%s" % (text[i_f_st:i_f_end])
+
+            if i_uf_st != len(text):
+                f_text += "%s" % (text[i_uf_st:])
+
+            return f_text
 
     def get_command_and_text(text):
         """split message into command and main text"""
@@ -53,12 +99,16 @@ def lambda_handler(event, context):
 
     command, main_text = get_command_and_text(message.get('text', ''))
 
+
     if command and command == '/thischat':
         bot.send_message(chat['id'], chat['id'], reply_to_message_id=message['message_id'])
         return RESPONSE_200
 
     original_chat = None
     original_message_id = None
+
+    # Handling reply to bot_request
+
 
     if not command and message.get('reply_to_message'):
         # try to get the message reference via reply_to_message
@@ -68,9 +118,23 @@ def lambda_handler(event, context):
             original_message_id = m.group(1)
             original_chat = m.group(2)
 
+
+
     # REPLY
+
     if not main_text and not any(message.get(key) for key in MEDIA) and not message.get('photo'):
-        bot.send_message(chat['id'], "<i>Empty message is ignored</i>", reply_to_message_id=message['message_id'], parse_mode='HTML')
+
+        # ____TODO_3:
+        if (
+            ('left_chat_member' in message) or
+            ('new_chat_members' in message) or
+            ('new_chat_photo' in message) or
+            ('pinned_message' in message) or
+            ('new_chat_title' in message)
+            (message['delete_chat_photo'] == True)):
+            return RESPONSE_200
+
+        bot.send_message(chat['id'], "<i>Empty message is ignored</i> ", reply_to_message_id=message['message_id'], parse_mode='HTML')
         return RESPONSE_200
 
     is_from_target_group = chat['id'] == TARGET_GROUP
@@ -85,18 +149,27 @@ def lambda_handler(event, context):
 
     if from_group:
         from_group = '<em>from</em> <b>%s</b>' % from_group
-       
+
+
+    #____TODO#1
+
+    if 'entities' in message is not None:
+        main_text = get_formatted_text(main_text,message['entities'])
+
+    #___TODO#1 END
+
+
     reply_text = "%s%s\n%s\n<i>msg:%s%s</i>" % (
-        from_group or '', 
-        ': ' if main_text and (from_group or show_username) else '', 
-        main_text, 
-        message['message_id'], 
+        from_group or '',
+        ': ' if main_text and (from_group or show_username) else '',
+        main_text,
+        message['message_id'],
         ':%s' % chat['id'] if not is_from_target_group else '')
 
     if show_username:
         author_link = "<a href=\"tg://user?id=%s\">%s</a>" % (user['id'], user['first_name'])
         reply_text = "%s%s%s" % (
-            author_link,  
+            author_link,
             ' ' if from_group else '',
             reply_text)
 
@@ -104,10 +177,11 @@ def lambda_handler(event, context):
         if message.get(key):
             # media are sent separately
             getattr(bot, method)(reply_chat, message[key]['file_id'], reply_to_message_id=original_message_id or None)
-            
+
     if message.get('photo'):
         photo = message.get('photo')[-1]
         bot.send_photo(reply_chat, photo['file_id'], caption=message.get('caption'))
-                           
+
     bot.send_message(reply_chat, reply_text, reply_to_message_id=original_message_id or None, parse_mode='HTML')
+
     return RESPONSE_200
