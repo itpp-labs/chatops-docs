@@ -99,6 +99,8 @@ Environment variables
 * ``ANONYMOUS_REPLY`` -- whether to send replies anonymously. Default True.
 * ``AANONYMOUS_REQUEST_FROM_GROUPS`` -- whether to show author name on requesting from another group. Default True.
 
+* ``ACCESS_BOT_LIST`` -- List of ID's (users) which can appeal to bot. If list is empty - everyone can use the bot
+* ``LOGGING_LEVEL`` -- Level of loger. (Allowed values: DEBUG, INFO, CRITICAL, ERROR, WARNING)
 
 Trigger
 ~~~~~~~

@@ -8,18 +8,7 @@ import re
 logger = logging.getLogger()
 
 # Set Debug level as environment variable (DEBUG, WARNING, ERROR, CRITICAL, INFO)
-
-if os.environ.get('LOGGING_LEVEL') == 'DEBUG':
-    logger.setLevel(logging.DEBUG)
-elif os.environ.get('LOGGING_LEVEL') == 'ERROR':
-    logger.setLevel(logging.ERROR)
-elif os.environ.get('LOGGING_LEVEL') == 'CRITICAL':
-    logger.setLevel(logging.CRITICAL)
-elif os.environ.get('LOGGING_LEVEL') == 'WARNING':
-    logger.setLevel(logging.WARNING)
-else:
-    logger.setLevel(logging.INFO)
-
+logger.setLevel(getattr(logging,os.environ.get('LOGGING_LEVEL')))
 
 RESPONSE_200 = {
     "statusCode": 200,
@@ -28,6 +17,42 @@ RESPONSE_200 = {
 }
 MEDIA = {'sticker': 'send_sticker', 'voice': 'send_voice', 'video': 'send_video', 'document': 'send_document', 'video_note': 'send_video_note'}
 
+SYSTEM_EMPTY_MESSAGES = [
+    'left_chat_member',
+    'new_chat_members',
+    'new_chat_photo',
+    'pinned_message',
+    'new_chat_title',
+    'delete_chat_photo']
+
+# Function, that returns a string with html-markups according to entities in message
+def get_formatted_text(text,entys):
+        i_uf_st = 0 #notformatted start index
+        i_uf_end =0 #nonformatted end index
+        f_text = ""
+        for ent in entys:
+            i_f_st =  ent['offset'] #formatted start index
+            i_f_end = ent['offset']+ent['length'] #formatted end index
+            i_uf_end = i_f_st
+
+            if i_uf_st != i_uf_end:
+                f_text += "%s" % (text[i_uf_st:i_uf_end])
+
+            i_uf_st = i_f_end
+
+            if ent['type'] == "bold":
+                f_text += "<b>%s</b>" % (text[i_f_st:i_f_end])
+            elif ent['type'] == "italic":
+                f_text += "<i>%s</i>" % (text[i_f_st:i_f_end])
+            elif ent['type'] == "code":
+                f_text += "<code>%s</code>" % (text[i_f_st:i_f_end])
+            else:
+                f_text += "%s" % (text[i_f_st:i_f_end])
+
+        if i_uf_st != len(text):
+            f_text += "%s" % (text[i_uf_st:])
+
+        return f_text
 
 def lambda_handler(event, context):
     logger.debug("Event: \n%s", event)
@@ -43,7 +68,8 @@ def lambda_handler(event, context):
     TARGET_GROUP = int(os.environ.get('TARGET_GROUP', 0))
     ANONYMOUS_REPLY = os.environ.get('ANONYMOUS_REPLY') != 'False'
     ANONYMOUS_REQUEST_FROM_GROUPS = os.environ.get('ANONYMOUS_REQUEST_FROM_GROUPS') != 'False'
-    ACCESS_BOT_LIST = [int(id.strip(' ')) for id in os.environ['ACCESS_BOT_LIST'].split(',')]
+
+    ACCESS_BOT_LIST = [int(id.strip(' ')) for id in os.environ['ACCESS_BOT_LIST'].split(',')] if os.environ['ACCESS_BOT_LIST']  else None
 
     # PARSE
     message = update.get('message')
@@ -55,39 +81,12 @@ def lambda_handler(event, context):
     # Only work with disabled threaded mode. See https://github.com/eternnoir/pyTelegramBotAPI/issues/161#issuecomment-343873014
     bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
-    #Handle if user has an access to bot
-    if user['id'] not in ACCESS_BOT_LIST:
-        bot.send_message(chat['id'], "<b>YOU SHALL NOT PASS!</b>", parse_mode='HTML')
-        return RESPONSE_200
-
-    #Function, that returns a string with html-markups according to entities in message
-    def get_formatted_text(text,entys):
-            i_uf_st = 0 #notformatted start index
-            i_uf_end =0 #nonformatted end index
-            f_text = ""
-            for ent in entys:
-                i_f_st =  ent['offset'] #formatted start index
-                i_f_end = ent['offset']+ent['length'] #formatted end index
-                i_uf_end = i_f_st
-
-                if i_uf_st != i_uf_end:
-                    f_text += "%s" % (text[i_uf_st:i_uf_end])
-
-                i_uf_st = i_f_end
-
-                if ent['type'] == "bold":
-                    f_text += "<b>%s</b>" % (text[i_f_st:i_f_end])
-                elif ent['type'] == "italic":
-                    f_text += "<i>%s</i>" % (text[i_f_st:i_f_end])
-                elif ent['type'] == "code":
-                    f_text += "<code>%s</code>" % (text[i_f_st:i_f_end])
-                else:
-                    f_text += "%s" % (text[i_f_st:i_f_end])
-
-            if i_uf_st != len(text):
-                f_text += "%s" % (text[i_uf_st:])
-
-            return f_text
+    # Handle if user has an access to bot
+    if ACCESS_BOT_LIST is not None:
+        if user['id'] not in ACCESS_BOT_LIST:
+            bot.send_message(chat['id'], """<i>This is the private bot.
+            The good news is that you deploy same bot for yourself: https://chatops.readthedocs.io/en/latest/todo-bot/index.html</i>""", parse_mode='HTML')
+            return RESPONSE_200
 
     def get_command_and_text(text):
         """split message into command and main text"""
@@ -100,7 +99,6 @@ def lambda_handler(event, context):
 
     command, main_text = get_command_and_text(message.get('text', ''))
 
-
     if command and command == '/thischat':
         bot.send_message(chat['id'], chat['id'], reply_to_message_id=message['message_id'])
         return RESPONSE_200
@@ -110,7 +108,6 @@ def lambda_handler(event, context):
 
     # Handling reply to bot_request
 
-
     if not command and message.get('reply_to_message'):
         # try to get the message reference via reply_to_message
         parent_text = message['reply_to_message'].get('text', '')
@@ -119,23 +116,15 @@ def lambda_handler(event, context):
             original_message_id = m.group(1)
             original_chat = m.group(2)
 
-
-
     # REPLY
-
     if not main_text and not any(message.get(key) for key in MEDIA) and not message.get('photo'):
 
         # Handling system 'Empty'-messages
-        if (
-            ('left_chat_member' in message) or
-            ('new_chat_members' in message) or
-            ('new_chat_photo' in message) or
-            ('pinned_message' in message) or
-            ('new_chat_title' in message)
-            (message['delete_chat_photo'] == True)):
-            return RESPONSE_200
+        for msg in SYSTEM_EMPTY_MESSAGES:
+            if msg in message:
+                return RESPONSE_200
 
-        bot.send_message(chat['id'], "<i>Empty message is ignored</i> ", reply_to_message_id=message['message_id'], parse_mode='HTML')
+        bot.send_message(chat['id'], "<i>Empty message is ignored</i>", reply_to_message_id=message['message_id'], parse_mode='HTML')
         return RESPONSE_200
 
     is_from_target_group = chat['id'] == TARGET_GROUP
@@ -151,8 +140,7 @@ def lambda_handler(event, context):
     if from_group:
         from_group = '<em>from</em> <b>%s</b>' % from_group
 
-
-    #If there is entitis in message
+    # If there is entities in message
 
     if 'entities' in message is not None:
         main_text = get_formatted_text(main_text,message['entities'])
