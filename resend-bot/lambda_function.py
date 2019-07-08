@@ -8,10 +8,7 @@ import re
 logger = logging.getLogger()
 
 # Set Debug level as environment variable (DEBUG, WARNING, ERROR, CRITICAL, INFO), by default: INFO
-if os.environ.get('LOGGING_LEVEL'):
-    logger.setLevel(getattr(logging,os.environ.get('LOGGING_LEVEL')))
-else:
-    logger.setLevel(logging.INFO)
+logger.setLevel(getattr(logging,os.environ.get('LOGGING_LEVEL'),'INFO'))
 
 RESPONSE_200 = {
     "statusCode": 200,
@@ -87,8 +84,8 @@ def lambda_handler(event, context):
     # Handle if user has an access to bot
     if ACCESS_BOT_LIST is not None:
         if user['id'] not in ACCESS_BOT_LIST:
-            bot.send_message(chat['id'], """<i>This is the private bot.
-            The good news is that you deploy same bot for yourself: https://chatops.readthedocs.io/en/latest/todo-bot/index.html</i>""", parse_mode='HTML')
+            bot.send_message(chat['id'], """<i>The good news is that you can deploy a similar bot for yourself:
+                https://chatops.readthedocs.io/en/latest/todo-bot/index.html</i>""", parse_mode='HTML')
             return RESPONSE_200
 
     def get_command_and_text(text):
@@ -104,6 +101,10 @@ def lambda_handler(event, context):
 
     if command and command == '/thischat':
         bot.send_message(chat['id'], chat['id'], reply_to_message_id=message['message_id'])
+        return RESPONSE_200
+
+    if command and command == '/myid':
+        bot.send_message(chat['id'], user['id'], reply_to_message_id=message['message_id'])
         return RESPONSE_200
 
     original_chat = None
