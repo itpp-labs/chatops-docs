@@ -84,8 +84,8 @@ def lambda_handler(event, context):
     # Handle if user has an access to bot
     if ACCESS_BOT_LIST is not None:
         if user['id'] not in ACCESS_BOT_LIST:
-            bot.send_message(chat['id'], """<i>The good news is that you can deploy a similar bot for yourself:
-                https://chatops.readthedocs.io/en/latest/todo-bot/index.html</i>""", parse_mode='HTML')
+            bot.send_message(chat['id'], r'<i>The good news is that you can deploy a similar bot for yourself:</i>'
+                r'<a href="https://chatops.readthedocs.io/en/latest/todo-bot/index.html"> (click-to-link) </a>', parse_mode='HTML')
             return RESPONSE_200
 
     def get_command_and_text(text):
