@@ -23,7 +23,7 @@ Technical specification
 Chat ID
 -------
  ``/thischat`` -- returns id of current chat. It's used for the identification of the Telegram group.
- ``/myid`` -- returs id of user
+ ``/myid`` -- returs id of a user
 
 Send message
 ------------
@@ -100,7 +100,7 @@ Environment variables
 * ``ANONYMOUS_REPLY`` -- whether to send replies anonymously. Default True.
 * ``AANONYMOUS_REQUEST_FROM_GROUPS`` -- whether to show author name on requesting from another group. Default True.
 
-* ``ACCESS_BOT_LIST`` -- List of ID's (users) which can appeal to bot. If list is empty - everyone can use the bot
+* ``ACCESS_BOT_LIST`` -- List of ID's (users) which can use the bot. If empty - everyone can.
 * ``LOGGING_LEVEL`` -- Level of loger. (Allowed values: DEBUG, INFO, CRITICAL, ERROR, WARNING), by default: INFO
 
 Trigger
