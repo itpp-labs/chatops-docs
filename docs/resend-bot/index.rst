@@ -23,7 +23,7 @@ Technical specification
 Chat ID
 -------
  ``/thischat`` -- returns id of current chat. It's used for the identification of the Telegram group.
- ``/myid`` -- returs id of a user
+ ``/myid`` -- returns id of a user
 
 Send message
 ------------
