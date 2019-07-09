@@ -16,15 +16,6 @@ The group might be:
 * IT Department of your company
 * etc.
 
-TODO: text formatting is lost on resending. Use [entities](https://core.telegram.org/bots/api#messageentity) instead of text field
-
-TODO: set debug level via Environment variables
-
-TODO: bots send empty messages, when someone left the group.
-
-TODO: make it possible to restrict who can use the bot
-
-
 
 Technical specification
 =======================
@@ -32,17 +23,18 @@ Technical specification
 Chat ID
 -------
  ``/thischat`` -- returns id of current chat. It's used for the identification of the Telegram group.
+ ``/myid`` -- returns id of a user
 
 Send message
-------------	
+------------
 The are following ways for sending *message-reqest* to the bot:
 
-* In **private chat** with the bot: any message 
+* In **private chat** with the bot: any message
 
   * e.g. *hello, how are you?, etc*
 * In **another** Telegram group (different from *Target group*): any message that starts with `/` and ends with `@<name_of_the_>bot` is used as a response to the Bot's message
 
-  * e.g. `/hey@super_bot`, `/please@request_bot`, etc. 
+  * e.g. `/hey@super_bot`, `/please@request_bot`, etc.
 
 Get message
 -----------
@@ -50,8 +42,8 @@ The *Target group* receives a copy of the message with a reference to the sender
 
 Response
 --------
-Users response to the bot, in so doing: 
- * The copy of the response is sent back to chat, which contains the original message. 
+Users response to the bot, in so doing:
+ * The copy of the response is sent back to chat, which contains the original message.
  * Response from *Target group* is anonymous by default, but could be customized.
 
 Examples
@@ -78,7 +70,7 @@ Check your steps:
 
 * Use the /newbot command to create a new bot first.
 * The name of the bot must be end witn "bot" (e.g. TetrisBot or tetris_bot).
-* Keep your token secure and store safely, it can be used by anyone to control your bot. 
+* Keep your token secure and store safely, it can be used by anyone to control your bot.
 
 Prepare zip file
 ----------------
@@ -102,12 +94,14 @@ Use ``Python 2.7``
 Environment variables
 ~~~~~~~~~~~~~~~~~~~~~
 * ``BOT_TOKEN`` -- the one you got from BotFather
-* ``TARGET_GROUP`` -- put here Chat ID from the Target group using ``/thischat`` command 
+* ``TARGET_GROUP`` -- put here Chat ID from the Target group using ``/thischat`` command
 
   * Note: ID number may contains the "-" before number
 * ``ANONYMOUS_REPLY`` -- whether to send replies anonymously. Default True.
 * ``AANONYMOUS_REQUEST_FROM_GROUPS`` -- whether to show author name on requesting from another group. Default True.
 
+* ``ACCESS_BOT_LIST`` -- List of ID's (users) which can use the bot. If empty - everyone can.
+* ``LOGGING_LEVEL`` -- Level of loger. (Allowed values: DEBUG, INFO, CRITICAL, ERROR, WARNING), by default: INFO
 
 Trigger
 ~~~~~~~
@@ -141,5 +135,3 @@ via curl
 
     # TODO pass allowed_updates arg
     curl -XPOST https://api.telegram.org/bot<YOURTOKEN>/setWebhook\?url\=YOURAPIGATEWAYURL
-
-
