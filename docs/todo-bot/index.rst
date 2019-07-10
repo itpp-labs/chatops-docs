@@ -15,7 +15,7 @@ Tasks can have on of the following states:
 * TODO -- to be done
 * DONE -- done
 * CANCELED -- nothing was done and not going to be done
-* WAITING -- cannot be started and waits for something
+* RELOCATED -- task is moved to another task management tool
 
 .. warning:: Official telegram docs say that "Bot storage is limited", though it's unknow how much or how long messages are kept in telegram servers. That may cause losing forwarded messages, while bot keeps only message IDS and task's description.
 
@@ -42,16 +42,6 @@ To create new task:
 
 * Forward message to the bot
 * Assign to a user from the list
-
-Roadmap
-=======
-
-On changing task status:
-
-* Don't send a message, but update existing message with the task
-* Don't send notification to another user, if status was not changed (user clicked button with the same status)
-Deployment
-==========
 
 Create a bot
 ------------
