@@ -271,7 +271,7 @@ def handle_callback():
 def handle_cron(event):
     # Time example "2019-04-16T09:45:07Z"
     TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
-    NOTIFICATION_TITLE = u'\u2757\ufe0f' + "There are some old tasks. Please, either <b>do</b> them, <b>relocate</b> somewhere or mark as <b>canceld</b>."
+    NOTIFICATION_TITLE = u'\u2757\ufe0f' + "There are some old tasks. Please, either <b>do</b> them, <b>relocate</b> somewhere or mark as <b>canceled</b>."
     time = event['time']
     dt = datetime.strptime(time, TIME_FORMAT)
     unixtime = (dt - datetime(1970, 1, 1)).total_seconds()
