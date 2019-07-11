@@ -8,7 +8,7 @@ import re
 logger = logging.getLogger()
 
 # Set Debug level as environment variable (DEBUG, WARNING, ERROR, CRITICAL, INFO), by default: INFO
-logger.setLevel(getattr(logging,os.environ.get('LOGGING_LEVEL'),'INFO'))
+logger.setLevel(getattr(logging,os.environ.get('LOGGING_LEVEL','INFO')))
 
 RESPONSE_200 = {
     "statusCode": 200,
