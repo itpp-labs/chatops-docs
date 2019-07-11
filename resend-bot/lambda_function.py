@@ -8,7 +8,7 @@ import re
 logger = logging.getLogger()
 
 # Set Debug level as environment variable (DEBUG, WARNING, ERROR, CRITICAL, INFO), by default: INFO
-logger.setLevel(getattr(logging,os.environ.get('LOGGING_LEVEL'),'INFO'))
+logger.setLevel(getattr(logging,os.environ.get('LOGGING_LEVEL','INFO')))
 
 RESPONSE_200 = {
     "statusCode": 200,
@@ -69,7 +69,7 @@ def lambda_handler(event, context):
     ANONYMOUS_REPLY = os.environ.get('ANONYMOUS_REPLY') != 'False'
     ANONYMOUS_REQUEST_FROM_GROUPS = os.environ.get('ANONYMOUS_REQUEST_FROM_GROUPS') != 'False'
 
-    ACCESS_BOT_LIST = [int(id.strip(' ')) for id in os.environ['ACCESS_BOT_LIST'].split(',')] if os.environ['ACCESS_BOT_LIST']  else None
+ACCESS_BOT_LIST = [int(id.strip(' ')) for id in os.environ['ACCESS_BOT_LIST'].split(',')] if os.environ.get('ACCESS_BOT_LIST')  else None
 
     # PARSE
     message = update.get('message')
