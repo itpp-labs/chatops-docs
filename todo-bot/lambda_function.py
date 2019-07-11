@@ -345,7 +345,7 @@ def com_update_task_state(task_id, task_state):
 
             task.task_state = task_state
             task.update_task_state()
-            updateTaskMessageText(task,message['message_id'], user['id'])
+            update_Task_Message_Text(task,message['message_id'], user['id'])
 
             notify_another_user(
                 task,
@@ -446,11 +446,15 @@ def com_print_task(task_id, check_rights=True):
     bot.send_message(chat['id'], "/t{task_id}".format(task_id=task_id), reply_markup=buttons, parse_mode='HTML')
 
 
-def  updateTaskMessageText(task,message,user):
+def  update_Task_Message_Text(task,message,user):
     header = escape_html(task.description)
     header += '\n\n'
     header += task_summary(task, user)
-    buttons = task_state_keyboard(task, row_width=4)
+
+    if task.task_state==TASK_STATE_TODO:
+        buttons = task_bottom_buttons(task,task_id = None)
+    else:
+        buttons = task_state_keyboard(task, row_width=4)
 
     bot.edit_message_text(text=header, chat_id = chat['id'], message_id = message, parse_mode='HTML', reply_markup=buttons )
 
