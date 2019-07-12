@@ -114,8 +114,8 @@ Environment variables
          print(json.dumps(dict([(k, emoji.emojize(v, use_aliases=True)) for k, v in d.items()])))
 
 
-* ``DYNAMODB_TABLE_TASK`` -- table with tasks
-* ``DYNAMODB_TABLE_USER`` -- table with users
+* ``DYNAMODB_TABLE_TASK`` -- table (name of the table) with tasks
+* ``DYNAMODB_TABLE_USER`` -- table (name of the table) with users
 * ``LOG_LEVEL`` -- ``DEBUG`` or ``INFO``
 * ``MIN_UPDATE_ID`` -- Number to distract from update_id in task's id computation. Use ``/update_id`` to get value.
 * ``FORWARDING_DELAY`` -- max seconds to wait for next forwarded message. It's a
