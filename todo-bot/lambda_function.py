@@ -340,7 +340,7 @@ def com_update_description(user_activity, task_id):
 def com_update_task_state(task_id, task_state):
     task = Task.load_by_id(task_id)
 
-    if utask.task_state != task_state and user['id'] in [task.from_id, task.to_id]:
+    if task.task_state != task_state and user['id'] in [task.from_id, task.to_id]:
 
         task.task_state = task_state
         task.update_task_state()
