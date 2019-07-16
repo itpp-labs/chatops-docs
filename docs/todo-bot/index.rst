@@ -15,13 +15,12 @@ Tasks can have on of the following states:
 * TODO -- to be done
 * DONE -- done
 * CANCELED -- nothing was done and not going to be done
-* WAITING -- cannot be started and waits for something
+* RELOCATED -- task is moved to another task management tool
 
 .. warning:: Official telegram docs say that "Bot storage is limited", though it's unknow how much or how long messages are kept in telegram servers. That may cause losing forwarded messages, while bot keeps only message IDS and task's description.
 
 Technical specification
 =======================
-
 
 * ``/mytasks``, ``/tasks_from_me`` -- shows tasks. By default it shows only WAITING and TODO tasks
 
@@ -46,10 +45,6 @@ To create new task:
 Roadmap
 =======
 
-On changing task status:
-
-* Don't send a message, but update existing message with the task
-* Don't send notification to another user, if status was not changed (user clicked button with the same status)
 Deployment
 ==========
 
@@ -71,7 +66,8 @@ To make a `deployment package <https://docs.aws.amazon.com/lambda/latest/dg/lamb
     zip -r /tmp/todo_bot_package.zip *
 
 Create DynamoDB tables
----------------------
+----------------------
+In *AWS (Amazon Web Services): DynamoDB service*
 
 Tasks table
 ~~~~~~~~~~~
@@ -101,18 +97,22 @@ It's used to save current user activity. For example, if user sends batch of for
 * *Partition key:* ``user_id`` (number)
 
 Create Lambda function
-----------------------
+---------------------- 
 
 Runtime
 ~~~~~~~
+
+In *AWS: Lambda service*
 
 Use ``Python 2.7``
 
 Environment variables
 ~~~~~~~~~~~~~~~~~~~~~
 
+In *AWS: Lambda service*
+
 * ``BOT_TOKEN`` -- the one you got from BotFather
-* ``USERS`` -- Dictionary of users who can be assigned to a task. Format: ``{USER_ID: USER_NAME}``. At this moment there is no API to get list of members. As a workaround you can ask users to send /myid command to get name and id and prepare the dictionary manually. To use emoji in user names to as following:
+* ``USERS`` -- Dictionary of users who can be assigned to a task. Format: ``{"USER_ID": "USER_NAME"}``. At this moment there is no API to get list of members. As a workaround you can ask users to send /myid command to get name and id and prepare the dictionary manually. To use emoji in user names to as following:
 
    * Get emoji code via http://www.webpagefx.com/tools/emoji-cheat-sheet/
    * Install python lib: https://pypi.python.org/pypi/emoji
@@ -124,8 +124,8 @@ Environment variables
          print(json.dumps(dict([(k, emoji.emojize(v, use_aliases=True)) for k, v in d.items()])))
 
 
-* ``DYNAMODB_TABLE_TASK`` -- table with tasks
-* ``DYNAMODB_TABLE_USER`` -- table with users
+* ``DYNAMODB_TABLE_TASK`` -- table with tasks (name of the table) 
+* ``DYNAMODB_TABLE_USER`` -- table with users (name of the table)
 * ``LOG_LEVEL`` -- ``DEBUG`` or ``INFO``
 * ``MIN_UPDATE_ID`` -- Number to distract from update_id in task's id computation. Use ``/update_id`` to get value.
 * ``FORWARDING_DELAY`` -- max seconds to wait for next forwarded message. It's a
@@ -137,84 +137,101 @@ Environment variables
 Trigger
 ~~~~~~~
 
+In *AWS: Lambda service*
+
 * **API Gateway**. Once you configure it and save, you will see ``Invoke URL`` under Api Gateway **details** section
 * **CloudWatch Events**. Create new rule for reminders, for example set
 
   * *Rule name* -- ``boto-todo-reminder``
   * *Schedule expression* -- ``rate(1 day)``
 
+
 Role
 ~~~~
 
-* The role must allow access to lambda and dynamodb services. The mimimal policies are:
+In *AWS: IAM (Identity and Access Management) service: Policies*
 
-for dynamodb:
+* Create policy of actions for DynamoDB:
+  
+  * *Service* -- ``DynamoDB``
+  * *Action* -- ``All DynamoDB actions``
+  * *Resources* -- ``All Resources``
 
-.. code-block:: json
+In *AWS: IAM service: Roles*
 
-    {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "VisualEditor0",
-                "Effect": "Allow",
-                "Action": [
-                    "dynamodb:DescribeReservedCapacity*",
-                    "dynamodb:List*",
-                    "dynamodb:DescribeTimeToLive",
-                    "dynamodb:DescribeLimits"
-                ],
-                "Resource": "*"
-            },
-            {
-                "Sid": "VisualEditor1",
-                "Effect": "Allow",
-                "Action": [
-                    "dynamodb:CreateTable",
-                    "dynamodb:BatchGet*",
-                    "dynamodb:PutItem",
-                    "dynamodb:DescribeTable",
-                    "dynamodb:Delete*",
-                    "dynamodb:Get*",
-                    "dynamodb:BatchWrite*",
-                    "dynamodb:Scan",
-                    "dynamodb:Query",
-                    "dynamodb:DescribeStream",
-                    "dynamodb:Update*"
-                ],
-                "Resource": "arn:aws:dynamodb:*:*:table/*"
-            }
-        ]
-    }
+In list of roles choose the role, which was named in process of creating lambda function, and attach to it recently created policy for DynamoDB
 
-for lambda (created automatically somehow)
+* The role must allow access to lambda and dynamodb services.
+
+By the final, role should look something like this:
+
+In *AWS: Lambda service: Designer: View Permissions (Key-Icon)*
 
 .. code-block:: json
 
     {
-        "Version": "2012-10-17",
-        "Statement": [
+        
+         "roleName": "{ROLE_NAME}",
+          "policies": [
             {
-                "Effect": "Allow",
-                "Action": [
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents"
-                ],
-                "Resource": [
-                    "arn:aws:logs:*:*:*"
+              "document": {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Effect": "Allow",
+                    "Action": [
+                      "logs:CreateLogGroup",
+                      "logs:CreateLogStream",
+                      "logs:PutLogEvents"
+                    ],
+                    "Resource": [
+                      "arn:aws:logs:*:*:*"
+                    ]
+                  }
                 ]
+              },          
+              "name": "AWSLambdaEdgeExecutionRole-daf8b371-4fc9-4e1a-9809-fcd44b96d4f2",
+              "id": "ANPAX7765LQXBC72HXN4W",
+              "type": "managed",
+              "arn": "arn:aws:iam::549753543726:policy/service-role/AWSLambdaEdgeExecutionRole-daf8b371-4fc9-4e1a-9809-fcd44b96d4f2"
+              },
+            {
+              "document": {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Sid": "VisualEditor0",
+                    "Effect": "Allow",
+                    "Action": "dynamodb:*",
+                    "Resource": "*"
+                  }
+                ]
+              },
+              "name": "{NAME_OF_POLICY_FOR_DYNAMODB}",
+              "id": "ANPAX7765LQXJUGC2FXMV",
+              "type": "managed",
+              "arn": "arn:aws:iam::549753543726:policy/{NAME_OF_POLICY_FOR_DYNAMODB}"
             }
-        ]
+          ],
+          "trustedEntities": [
+            "edgelambda.amazonaws.com",
+            "lambda.amazonaws.com"
+          ]
+            
     }
+
 
 Timeout
 ~~~~~~~
+
+in *AWS: Lambda service*
 
 Execution time depends on telegram server and amount of requests there. So, think about 30 seconds for limit.
 
 Concurrency
 ~~~~~~~~~~~
+
+in *AWS: Lambda service*
 
 You may need to disable concurrency (i.e. set **Reserve concurrency** to value **1**) as a workaround for following issue: on resending batch of messages, those might be processed by several workers, so you might get several messages instead of a single one.
 
@@ -241,3 +258,10 @@ via curl
 
     # TODO pass allowed_updates arg
     curl -XPOST https://api.telegram.org/bot<YOURTOKEN>/setWebhook\?url\=YOURAPIGATEWAYURL
+
+via url
+~~~~~~~~
+
+Type the following in your browser and hit enter. (Make sure to substitute the place holder text)::
+
+        https://api.telegram.org/bot<your-bot-token>/setWebHook?url=<your-API-invoke-URL>
