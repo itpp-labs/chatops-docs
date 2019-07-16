@@ -336,22 +336,24 @@ def com_update_description(user_activity, task_id):
     user_activity.task_id = task_id
     user_activity.update_activity_and_task()
 
+
 def com_update_task_state(task_id, task_state):
     task = Task.load_by_id(task_id)
-    if user['id'] in [task.from_id, task.to_id]:
-        reply_text = TASK_STATE_TO_HTML[task_state]
-        send(reply_text)
+
+    if utask.task_state != task_state and user['id'] in [task.from_id, task.to_id]:
+
         task.task_state = task_state
         task.update_task_state()
+        update_task_message_text(task,message['message_id'], user['id'])
 
         notify_another_user(
-            task,
-            '<b>%s Task State is changed by</b> %s\n\n%s' % (
+                task,
+                '<b>%s Task State is changed by</b> %s\n\n%s' % (
                 EMOJI_NEW_STATE_FROM_ANOTHER,
                 user2link(user),
                 escape_html(task.description)
-            )
-        )
+                )
+                )
     else:
         send(NOT_FOUND_MESSAGE)
 
@@ -442,6 +444,18 @@ def com_print_task(task_id, check_rights=True):
     buttons = task_bottom_buttons(task)
     bot.send_message(chat['id'], "/t{task_id}".format(task_id=task_id), reply_markup=buttons, parse_mode='HTML')
 
+
+def  update_task_message_text(task,message,user):
+    header = escape_html(task.description)
+    header += '\n\n'
+    header += task_summary(task, user)
+
+    if task.task_state==TASK_STATE_TODO:
+        buttons = task_bottom_buttons(task,task_id = None)
+    else:
+        buttons = task_state_keyboard(task, row_width=4)
+
+    bot.edit_message_text(text=header, chat_id = chat['id'], message_id = message, parse_mode='HTML', reply_markup=buttons )
 
 #########################
 # Buttons and Keyboards #
