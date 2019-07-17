@@ -340,22 +340,23 @@ def com_update_description(user_activity, task_id):
 def com_update_task_state(task_id, task_state):
     task = Task.load_by_id(task_id)
 
-    if task.task_state != task_state and user['id'] in [task.from_id, task.to_id]:
+    if task.task_state != task_state:
+        if user['id'] in [task.from_id, task.to_id]:
 
-        task.task_state = task_state
-        task.update_task_state()
-        update_task_message_text(task,message['message_id'], user['id'])
+            task.task_state = task_state
+            task.update_task_state()
+            update_task_message_text(task,message['message_id'], user['id'])
 
-        notify_another_user(
-                task,
-                '<b>%s Task State is changed by</b> %s\n\n%s' % (
-                EMOJI_NEW_STATE_FROM_ANOTHER,
-                user2link(user),
-                escape_html(task.description)
-                )
-                )
-    else:
-        send(NOT_FOUND_MESSAGE)
+            notify_another_user(
+                    task,
+                    '<b>%s Task State is changed by</b> %s\n\n%s' % (
+                    EMOJI_NEW_STATE_FROM_ANOTHER,
+                    user2link(user),
+                    escape_html(task.description)
+                    )
+                    )
+        else:
+            send(NOT_FOUND_MESSAGE)
 
 
 def com_assign(user_activity, task_id):
