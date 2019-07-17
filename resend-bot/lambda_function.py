@@ -69,7 +69,7 @@ def lambda_handler(event, context):
     ANONYMOUS_REPLY = os.environ.get('ANONYMOUS_REPLY') != 'False'
     ANONYMOUS_REQUEST_FROM_GROUPS = os.environ.get('ANONYMOUS_REQUEST_FROM_GROUPS') != 'False'
 
-ACCESS_BOT_LIST = [int(id.strip(' ')) for id in os.environ['ACCESS_BOT_LIST'].split(',')] if os.environ.get('ACCESS_BOT_LIST')  else None
+    ACCESS_BOT_LIST = [int(id.strip(' ')) for id in os.environ['ACCESS_BOT_LIST'].split(',')] if os.environ.get('ACCESS_BOT_LIST')  else None
 
     # PARSE
     message = update.get('message')

@@ -340,23 +340,22 @@ def com_update_description(user_activity, task_id):
 def com_update_task_state(task_id, task_state):
     task = Task.load_by_id(task_id)
 
-    if task.task_state != task_state:
-        if user['id'] in [task.from_id, task.to_id]:
+    if task.task_state != task_state and user['id'] in [task.from_id, task.to_id]:
 
-            task.task_state = task_state
-            task.update_task_state()
-            update_Task_Message_Text(task,message['message_id'], user['id'])
+        task.task_state = task_state
+        task.update_task_state()
+        update_task_message_text(task,message['message_id'], user['id'])
 
-            notify_another_user(
+        notify_another_user(
                 task,
                 '<b>%s Task State is changed by</b> %s\n\n%s' % (
-                    EMOJI_NEW_STATE_FROM_ANOTHER,
-                    user2link(user),
-                    escape_html(task.description)
+                EMOJI_NEW_STATE_FROM_ANOTHER,
+                user2link(user),
+                escape_html(task.description)
                 )
-            )
-        else:
-            send(NOT_FOUND_MESSAGE)
+                )
+    else:
+        send(NOT_FOUND_MESSAGE)
 
 
 def com_assign(user_activity, task_id):
@@ -446,7 +445,7 @@ def com_print_task(task_id, check_rights=True):
     bot.send_message(chat['id'], "/t{task_id}".format(task_id=task_id), reply_markup=buttons, parse_mode='HTML')
 
 
-def  update_Task_Message_Text(task,message,user):
+def  update_task_message_text(task,message,user):
     header = escape_html(task.description)
     header += '\n\n'
     header += task_summary(task, user)
