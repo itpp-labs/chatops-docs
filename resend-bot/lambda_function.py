@@ -1,3 +1,4 @@
+# Copyright 2019 Ivan Yelizariev <https://it-projects.info/team/yelizariev>
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl).
 import telebot  # https://github.com/eternnoir/pyTelegramBotAPI
 import sys
