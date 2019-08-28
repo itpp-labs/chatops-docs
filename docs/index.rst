@@ -11,3 +11,4 @@ Welcome to ChatOps's documentation!
 
    todo-bot/index
    resend-bot/index
+   ifttt-to-telegram/index
