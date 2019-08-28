@@ -69,4 +69,4 @@ Try it out
 
 Use URL of the following format to replace with your ifttt webhook URL:
 
-``<INVOKE_URL>?event=<EVENT_NAME>``, for example ``https://9ltrkrik2l.execute-api.eu-central-1.amazonaws.com/default/MyLambda/?event=RED_PULL_REQUEST``
+``<INVOKE_URL>?event=<EVENT_NAME>``, for example ``https://9ltrkrik2l.execute-api.eu-central-1.amazonaws.com/default/MyLambda?event=RED_PULL_REQUEST``
