@@ -21,7 +21,10 @@ def lambda_handler(event, context):
 
     # READ event
     event_name = event['queryStringParameters'].get('event')
-    values = json.loads(event['body'])
+    try:
+        values = json.loads(event.get('body', ''))
+    except:
+        values = {"error": "cannot parse body as json"}
     logger.debug('event_name=%s; values=%s', event_name, values)
 
     # READ environment variables
