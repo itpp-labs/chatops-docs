@@ -3,6 +3,8 @@
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl).
 import telebot  # https://github.com/eternnoir/pyTelegramBotAPI
 from telebot.types import KeyboardButton, InlineKeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup, ReplyKeyboardRemove
+from telebot.apihelper import ApiException
+
 import os
 import logging
 import re
@@ -48,7 +50,7 @@ def lambda_handler(event, context):
 
     # Empty message
     if not main_text and not any(message.get(key) for key in MEDIA) and not message.get('photo'):
-        bot.send_message(chat['id'], "<i>Empty message is ignored</i>", reply_to_message_id=message['message_id'], parse_mode='HTML')
+        send("<i>Empty message is ignored</i>", reply=True)
         return RESPONSE_200
 
     # Check for recent activity
@@ -436,13 +438,18 @@ def com_print_task(task_id, check_rights=True):
         button_update_description(task_id),
     )
 
-    bot.send_message(chat['id'], header, reply_to_message_id=message['message_id'], parse_mode='HTML', reply_markup=buttons)
+    send(header, reply=True, reply_markup=buttons)
     for from_chat_id, msg_id in task.messages:
-        bot.forward_message(
-            chat['id'],
-            from_chat_id=from_chat_id,
-            message_id=msg_id,
-        )
+        try:
+            bot.forward_message(
+                chat['id'],
+                from_chat_id=from_chat_id,
+                message_id=msg_id,
+            )
+        except ApiException as e:
+            res = e.result.json()
+            if res['description'] == "Bad Request: message to forward not found":
+                return send("Message is not found. The sender has probably deleted bot's chat history: msg_id=%s" % msg_id)            
 
     buttons = task_bottom_buttons(task)
     bot.send_message(chat['id'], "/t{task_id}".format(task_id=task_id), reply_markup=buttons, parse_mode='HTML')
@@ -497,7 +504,7 @@ def task_state_keyboard(task, task_id=None, row_width=4):
 
 
 def assign_keyboard():
-    reply_markup = ReplyKeyboardMarkup(row_width=3)
+    reply_markup = ReplyKeyboardMarkup(row_width=4)
     reply_markup.add(
         *[KeyboardButton(
             '%s u%s' % (user_name, user_id)
@@ -636,7 +643,7 @@ EMOJI_SEND_MESSAGE_TO_ATTACH = u'\u2709' + EMOJI_AUTO_ATTACHED_MESSAGE  # envelo
 EMOJI_NEW_TASK = u'\U0001f609'  # emoji.emojize(':wink:', use_aliases=True)
 EMOJI_SEPARATOR_MY_TASKS = u'\U0001f68b' * 10  # emoji.emojize(':train:', use_aliases=True)
 EMOJI_UPDATE_DESCRIPTION = u'\U0001f4d6'  # emoji.emojize(u":book:", use_aliases=True)
-EMOJI_UPDATE_ASSIGNED_TO = u'\U0001f920'  # emoji.emojize(u"🤠", use_aliases=True)
+EMOJI_UPDATE_ASSIGNED_TO = u'\U0001f920'  # emoji.emojize(u"\U0001f920", use_aliases=True)
 EMOJI_MY_TASKS = u'\u2b50'  # emoji.emojize(u":star:", use_aliases=True)
 EMOJI_TASKS_FROM_ME = EMOJI_TASK_TO
 EMOJI_STOP_ATTACHING = u'\U0001f44c'  # emoji.emojize(u":ok_hand:", use_aliases=True)
@@ -660,8 +667,12 @@ TASK_STATE_TO_HTML = {
 #####################
 def send(reply_text, reply_markup=None, reply=True):
     logger.debug('Send message: %s', reply_text)
-    bot.send_message(chat['id'], reply_text, reply_to_message_id=reply and message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
-
+    try:
+        bot.send_message(chat['id'], reply_text, reply_to_message_id=reply and message['message_id'], parse_mode='HTML', reply_markup=reply_markup)
+    except ApiException as e:
+        res = e.result.json()
+        if reply and res['description'] == "Bad Request: reply message not found":
+            return send(reply_text, reply_markup=reply_markup, reply=False)
 
 def notify_another_user(task, reply_text):
     another_user_id = None
