@@ -20,7 +20,7 @@ Tasks can have on of the following states:
 .. warning:: Bot keeps only message IDS and task's description (which is text of the first message). 
     It means that if chat history is deleted, then some task information could be lost. 
     Chat history could be deleted either by user or by telegram itself. 
-    What we know for the latter case is that "Bot storage is limited",
+    What we know about the latter case is that "Bot storage is limited",
     though it's unknow how much or how long messages are kept in telegram servers.
 
 Technical specification
