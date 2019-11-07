@@ -17,7 +17,11 @@ Tasks can have on of the following states:
 * CANCELED -- nothing was done and not going to be done
 * RELOCATED -- task is moved to another task management tool
 
-.. warning:: Official telegram docs say that "Bot storage is limited", though it's unknow how much or how long messages are kept in telegram servers. That may cause losing forwarded messages, while bot keeps only message IDS and task's description.
+.. warning:: Bot keeps only message IDS and task's description. 
+    It means that if chat history is deleted, then some task information could be lost. 
+    Chat history could be deleted either by user or by telegram itself. 
+    What we know for the latter case is that "Bot storage is limited",
+    though it's unknow how much or how long messages are kept in telegram servers.
 
 Technical specification
 =======================
