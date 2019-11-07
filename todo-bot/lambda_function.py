@@ -449,7 +449,7 @@ def com_print_task(task_id, check_rights=True):
         except ApiException as e:
             res = e.result.json()
             if res['description'] == "Bad Request: message to forward not found":
-                return send("Message is not found. The sender has probably deleted bot's chat history: msg_id=%s" % msg_id)            
+                send("Message is not found. The sender has probably deleted bot's chat history: msg_id=%s" % msg_id)            
 
     buttons = task_bottom_buttons(task)
     bot.send_message(chat['id'], "/t{task_id}".format(task_id=task_id), reply_markup=buttons, parse_mode='HTML')
