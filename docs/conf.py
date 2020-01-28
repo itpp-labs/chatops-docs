@@ -19,9 +19,9 @@
 
 # -- Project information -----------------------------------------------------
 
-project = u'ChatOps'
-copyright = u'2018, IT-Projects LLC'
-author = u'IT-Projects LLC'
+project = u'itpp.dev/chat/'
+copyright = u'2020, IT-Projects Labs; 2018-2019, IT-Projects LLC'
+author = u'IT-Projects Labs'
 
 # The short X.Y version
 version = u''
@@ -81,12 +81,12 @@ html_theme = 'alabaster'
 # further.  For a list of options available for each theme, see the
 # documentation.
 #
-#html_theme_options = {
-#    'github_banner': True,
-#    'show_powered_by': False,
-#    'github_user': 'it-projects-llc',
-#    'github_repo': 'odoo-test',
-#}
+html_theme_options = {
+    'github_banner': True,
+    'show_powered_by': False,
+    'github_user': 'itpp-labs',
+    'github_repo': 'chatops-docs',
+}
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
