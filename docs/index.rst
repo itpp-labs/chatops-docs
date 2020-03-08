@@ -9,6 +9,7 @@ ChatOps
 .. toctree::
    :maxdepth: 2
 
+   archive-bot/index
    todo-bot/index
    resend-bot/index
    ifttt-to-telegram/index
