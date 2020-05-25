@@ -28,7 +28,7 @@ To make `deployment package <https://docs.aws.amazon.com/lambda/latest/dg/lambda
     cd /tmp/bot
 
     pip3 install pyTelegramBotAPI -t .
-    wget https://gitlab.com/itpp/chatops/raw/master/ifttt-to-telegram/lambda_function.py
+    wget https://github.com/itpp-labs/chatops-docs/raw/master/ifttt-to-telegram/lambda_function.py
     zip -r /tmp/bot.zip *
 
 
