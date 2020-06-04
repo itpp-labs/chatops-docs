@@ -4,6 +4,7 @@
 
 This is a sort of poll bot for telegram, but allows user to set a custom answer.
 
+Try it out here: http://t.me/opinions_matter_bot
 
 .. contents::
    :local:
@@ -73,8 +74,8 @@ Settings
 On creating AWS Lambda, you would need to set following Environment variables:
 
 * TELEGRAM_TOKEN=<telegram token you got from Bot Father>
-* LOG_LEVEL=<LEVEL> -- Optional. ``DEBUG``, ``INFO``, etc.
-* DYNAMO_DB_TABLE_NAME -- Optional. By default ``opinion_bot``
+* LOG_LEVEL=<LEVEL> -- ``DEBUG``, ``INFO``, etc. Set value to ``DEBUG`` on first run to create dynamodb table.
+* DYNAMO_DB_TABLE_NAME -- Optional. By default ``opinions-bot``
 
 Bot source
 ==========
