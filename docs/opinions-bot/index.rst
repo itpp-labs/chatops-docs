@@ -98,7 +98,7 @@ To make a `deployment package <https://docs.aws.amazon.com/lambda/latest/dg/lamb
     mkdir /tmp/bot
     cd /tmp/bot
 
-    pip3 install python-telegram-bot pynamodb --system -t .
+    pip3 install python-telegram-bot pynamodb python_dynamodb_lock --system -t .
     wget https://raw.githubusercontent.com/itpp-labs/chatops-docs/master/tools/opinions-bot/lambda_function.py -O lambda_function.py
     # delete built-in or unused dependencies
     rm -rf tornado* docutils*
