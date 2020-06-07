@@ -80,7 +80,7 @@ To make `deployment package <https://docs.aws.amazon.com/lambda/latest/dg/lambda
     cd /tmp/resend-bot
 
     pip2 install pyTelegramBotAPI -t .
-    wget https://gitlab.com/itpp/chatops/raw/master/resend-bot/lambda_function.py -O lambda_function.py
+    wget https://raw.githubusercontent.com/itpp-labs/chatops-docs/master/resend-bot/lambda_function.py -O lambda_function.py
     zip -r /tmp/resend_bot_package.zip *
 
 Create Lambda function
