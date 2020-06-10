@@ -72,11 +72,14 @@ def handle_telegram(telegram_payload):
         return
 
     if DEBUG:
-        Storage.create_table(read_capacity_units=1, write_capacity_units=1, wait=True)
+        Poll.create_table(read_capacity_units=5, write_capacity_units=5, wait=True)
+
+        ddb_client = boto3.client('dynamodb')
+        DynamoDBLockClient.create_dynamodb_table(ddb_client)
 
     if message.reply_to_message:
-        poll_id = message2poll(message.reply_to_message)
-        set_vote(poll_id, vote_text=message.text, reply=message.message_id)
+        poll_key = message2poll_key(message.reply_to_message)
+        set_vote(message.from_user, poll_key, option_text=message.text, reply=message.message_id)
         return
 
     command, question = get_command_and_text(message.get('text', ''))
@@ -102,17 +105,20 @@ def handle_callback_query(callback_query):
         )
         return
     if data[0] == "vote":
-        set_vote(message2poll_key(message), vote_id=int(data[1]))
+        set_vote(message.from_user, message2poll_key(message), option_id=int(data[1]))
 
 def message2poll_key(message):
     return "%s:%s" % (message.chat.id, message.message_id)
 def poll2chat_message_ids(poll):
     return poll.key.split(":")
 
-def create_poll(message, question):
+def telegram2json(telegram_object):
     # to_json returns string
     # see https://python-telegram-bot.readthedocs.io/en/stable/telegram.telegramobject.html#telegram.TelegramObject.to_json
-    author = json.loads(message.from_user.to_json())
+    return json.loads(telegram_object.to_json())
+
+def create_poll(message, question):
+    author = telegram2json(message.from_user)
     poll = Poll()
     poll_message = bot.sendMessage(
         message.chat.id,
@@ -126,9 +132,41 @@ def create_poll(message, question):
     poll.telegram_version = 1
     poll.save()
 
-def set_vote(poll_id, vote_id=None, vote_text=None, reply=None):
-    poll = TODO
-    # TODO: update poll data
+def set_vote(telegram_user, poll_key, option_id=None, option_text=None, reply=None):
+    poll = Poll.get(poll_key)
+
+    if option_text:
+        # add option if it doesn't exist yet
+        poll.update(
+            actions=[Poll.options.append(option_text)],
+            condition=Poll.opinions.contains(option_text)
+        )
+        # compute option_id
+        for option_id, text in enumerate(poll.options):
+            if text == option_text:
+                break
+
+    else:
+        assert option_id
+
+    # Add user if it doesn't exist yet.
+    #
+    # It seems, that we can't use condition for users attribute.
+    # So, just add user without transactional check.
+    # It's actually not a big problem:
+    # * we can have duplicates
+    # * it's unlikely to have parallel requests from the same user
+    for u in poll.users:
+        if u.user_id == telegram_user.user_id:
+            break
+    else:
+        db_user = User(telegram_user.user_id)
+        db_user.data = telegram2json(telegram_user)
+        poll.update([Poll.users.append(db_user)])
+
+    # TODO votes
+
+
     try:
         update_poll_message(poll)
     except DynamoDBLockError as e:
@@ -236,9 +274,9 @@ class User(MapAttribute):
     user_id = NumberAttribute()
     data = JSONAttribute()
 
-class Option(MapAttribute):
-    option_id = NumberAttribute()
-    text = UnicodeAttribute()
+#class Option(MapAttribute):
+#    option_id = NumberAttribute()
+#    text = UnicodeAttribute()
 
 class Vote(MapAttribute):
     user_id = NumberAttribute()
@@ -251,19 +289,11 @@ class Poll(Model):
     class Meta:
         table_name = DYNAMO_DB_TABLE_NAME
     key = UnicodeAttribute(hash_key=True)
-    # {
-    #   "question": STR,
-    #   "votes": [{
-    #     "text": STR,
-    #     "users": [User]
-    #     "id": INT
-    #   }],
-    #   "author": User,
-    # }
-    # json = JSONAttribute()
+
     question = UnicodeAttribute
     author = JSONAttribute()
-    options = ListAttribute(of=Option)
+    # option_id is index of the option in the list
+    options = ListAttribute()
     votes = ListAttribute(of=Vote)
     users = ListAttribute(of=User)
     # see https://pynamodb.readthedocs.io/en/latest/optimistic_locking.html
