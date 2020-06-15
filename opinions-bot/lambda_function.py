@@ -15,17 +15,22 @@ from python_dynamodb_lock.python_dynamodb_lock import *
 # https://github.com/python-telegram-bot/python-telegram-bot
 from telegram import Update, Bot, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 
-DYNAMO_DB_TABLE_NAME = os.getenv("DYNAMO_DB_TABLE_NAME", "opinions-bot")
+bot = Bot(token=os.getenv('TELEGRAM_TOKEN'))
 
-logger = logging.getLogger()
+logger = logging.getLogger("opinions-bot")
 LOG_LEVEL = os.getenv("LOG_LEVEL")
 DEBUG = LOG_LEVEL == "DEBUG"
 if LOG_LEVEL:
     level = getattr(logging, LOG_LEVEL)
-    logging.basicConfig(format='%(name)s [%(levelname)s]: %(message)s', level=level)
+    fmt = logging.Formatter('%(name)s [%(levelname)s]: %(message)s')
+    handler = logging.StreamHandler()
+    handler.setFormatter(fmt)
+    logger.addHandler(handler)
+    logger.setLevel(level)
+    logger.propagate = False
+    logger.error("LOG_LEVEL: %s", LOG_LEVEL)
 
-bot = Bot(token=os.getenv('TELEGRAM_TOKEN'))
-
+DYNAMO_DB_TABLE_NAME = os.getenv("DYNAMO_DB_TABLE_NAME", "opinions-bot")
 ADD_YOU_OPINION_MESSAGE="""To add your answer, reply to the original message with the question.
 
 <em>Replying to forwarded message will not affect. Moreover, forwarded message with the questions and answers are frozen forever. You can forward the message for fix current answers<em>"""
