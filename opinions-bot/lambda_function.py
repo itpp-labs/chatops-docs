@@ -31,7 +31,7 @@ ADD_YOU_OPINION_MESSAGE="""To add your answer, reply to the original message wit
 <em>Replying to forwarded message will not affect. Moreover, forwarded message with the questions and answers are frozen forever. You can forward the message for fix current answers<em>"""
 
 UPDATING_POLL_MESSAGE_DELAY = 1 # seconds
-
+MAX_INLINE_OPTIONS=30
 
 def lambda_handler(event, context):
     # read event
@@ -88,7 +88,7 @@ def handle_telegram(telegram_payload):
 def handle_cron(cloudwatch_time):
     dt = datetime.strptime(cloudwatch_time, TIME_FORMAT)
     unixtime = (dt - datetime(1970, 1, 1)).total_seconds()
-    # TODO
+    # This is a placeholder for cron features, e.g. close poll at some point
 
 def handle_callback_query(callback_query):
     data = callback_query.data
@@ -139,7 +139,7 @@ def set_vote(telegram_user, poll_key, option_id=None, option_text=None, reply=No
         # add option if it doesn't exist yet
         poll.update(
             actions=[Poll.options.append(option_text)],
-            condition=Poll.opinions.contains(option_text)
+            condition=~Poll.opinions.contains(option_text)
         )
         # compute option_id
         for option_id, text in enumerate(poll.options):
@@ -150,22 +150,15 @@ def set_vote(telegram_user, poll_key, option_id=None, option_text=None, reply=No
         assert option_id
 
     # Add user if it doesn't exist yet.
-    #
-    # It seems, that we can't use condition for users attribute.
-    # So, just add user without transactional check.
-    # It's actually not a big problem:
-    # * we can have duplicates
-    # * it's unlikely to have parallel requests from the same user
-    for u in poll.users:
-        if u.user_id == telegram_user.user_id:
-            break
-    else:
-        db_user = User(telegram_user.user_id)
-        db_user.data = telegram2json(telegram_user)
-        poll.update([Poll.users.append(db_user)])
+    poll.update(
+        actions=[Poll.users[telegram_user.user_id].set(db_user)],
+        condition=[~Poll.users[telegram_user.user_id].exists()]
+    )
 
-    # TODO votes
-
+    # Update vote
+    poll.update(
+        actions=[Poll.votes[telegram_user.user_id].set(option_id)],
+    )
 
     try:
         update_poll_message(poll)
@@ -225,22 +218,14 @@ def poll2text(poll):
     msg.append("")
     total = len(poll.votes)
 
-    user_by_id = dict(
-        (user.user_id, user)
-        for user in poll.users
-    )
+    users_by_option_id = poll.get_users_by_option_id()
 
-    users_by_option_id = {}
-    for vote in poll.votes:
-        users_by_option_id.setdefault(vote.option_id, [])
-        users_by_option_id[vote.option_id].append(user_by_id[vote.user_id])
-
-    for opt in poll.options:
-        users = users_by_option_id.get(opt.option_id)
+    for option_id, option_text in enumerate(poll.options):
+        users = users_by_option_id.get(option_id)
         if not users:
             continue
-        users = [user2link(u) for u in users]
-        msg.append("* %.1f%% %s — %s" % (100.0 * len(users/total), opt.text, ', '.join(users)))
+        users_links = [user2link(u) for u in users]
+        msg.append("* %.1f%% %s — %s" % (100.0 * len(users/total), option_text, ', '.join(users_links)))
     return "\n".join(msg)
 
 def poll2markup(poll):
@@ -250,9 +235,14 @@ def poll2markup(poll):
         (opt.option_id, opt)
         for opt in poll.options
     )
-    for vote_rel in poll.votes:
+    opt_users = sorted(
+        poll.get_users_by_option_id().items(),
+        key=lambda item: len(item[1]),
+        reverse=True
+    )
+    i = 0
+    for option_id, users in opt_users:
         # make buttons for options with votes
-        vote = vote_rel.vote_id
         opt = opt_by_id[vote.option_id]
         buttons.append(InlineKeyboardButton(
             opt.text,
@@ -261,6 +251,9 @@ def poll2markup(poll):
                 opt.option_id
             ])
         ))
+        i += 1
+        if i > MAX_INLINE_OPTIONS:
+            break
 
     new_vote_button = InlineKeyboardButton(
         "<em>Add your vote</em>",
@@ -294,13 +287,21 @@ class Poll(Model):
     author = JSONAttribute()
     # option_id is index of the option in the list
     options = ListAttribute()
-    votes = ListAttribute(of=Vote)
-    users = ListAttribute(of=User)
+    votes = MapAttribute()  # user_id -> option_id
+    users = MapAttribute()   # user_id -> data
     # see https://pynamodb.readthedocs.io/en/latest/optimistic_locking.html
     version = VersionAttribute()
     # information about poll message in telegram
     telegram_version = NumberAttribute()
     telegram_datetime = UnicodeDatetimeAttribute()
+
+    def get_users_by_option_id(self):
+        users_by_option_id = {}
+        for user_id, option_id in self.votes.items():
+            users_by_option_id.setdefault(option_id, [])
+            users_by_option_id[option_id].append(self.users[user_id])
+        return users_by_option_id
+
 
 def get_command_and_text(text):
     """split message into command and main text"""
