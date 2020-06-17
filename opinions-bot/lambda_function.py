@@ -77,10 +77,13 @@ def handle_telegram(telegram_payload):
         return
 
     if DEBUG:
-        Poll.create_table(read_capacity_units=5, write_capacity_units=5, wait=True)
+        # Create tables
+        with CreateTableIfNotExists():
+            Poll.create_table(read_capacity_units=5, write_capacity_units=5, wait=True)
 
-        ddb_client = boto3.client('dynamodb')
-        DynamoDBLockClient.create_dynamodb_table(ddb_client)
+        with CreateTableIfNotExists():
+            ddb_client = boto3.client('dynamodb')
+            DynamoDBLockClient.create_dynamodb_table(ddb_client)
 
     if message.reply_to_message:
         poll_key = message2poll_key(message.reply_to_message)
@@ -334,3 +337,18 @@ def user2name(user):
         name += ' %s' % user.get('last_name')
 
     return name
+
+class CreateTableIfNotExists():
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        if not exc_type:
+            # no exceptions
+            return True
+        elif exc_value and exc_value.response['Error']['Code'] == "ResourceInUseException":
+            # table exists
+            return True
+        else:
+            # reraise error
+            return False
