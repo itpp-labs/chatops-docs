@@ -22,16 +22,6 @@ The bot works in groups only.
 
   *no opinions yet*
 
-  [ *Add your opinion* ]
-
-* Clicking the button is not neccesary, if one does it, the answer will be the following::
-
-  To add your answer, reply to the original message with the question.
-
-  *Replying to forwarded message will not affect. Moreover, forwarded message
-   with the questions and answers are frozen forever. You can forward the
-   message for fix current answers*
-
 * Once a user replies to the question-message, the question-message is updated and new buttons are added. For example, after few replies the question-message may look like following::
 
   What do you think?
@@ -65,6 +55,8 @@ The bot works in groups only.
   [ It's not just good, it's awersome!!! ]
   [ *Add your opinions* ]
 
+
+* If user replies to a forwarded bot message, the bot will respond with the comment that explains how to use the bot.
 
 As you see, the voting can be public only.
 
