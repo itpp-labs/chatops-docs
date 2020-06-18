@@ -9,8 +9,8 @@ from datetime import datetime, timedelta
 import time
 
 from pynamodb.models import Model
-from pynamodb.attributes import *
-from python_dynamodb_lock.python_dynamodb_lock import *
+from pynamodb.attributes import MapAttribute, ListAttribute, NumberAttribute, VersionAttribute, UTCDateTimeAttribute, JSONAttribute, UnicodeAttribute
+from python_dynamodb_lock.python_dynamodb_lock import DynamoDBLockClient
 
 # https://github.com/python-telegram-bot/python-telegram-bot
 from telegram import Update, Bot, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
@@ -90,7 +90,7 @@ def handle_telegram(telegram_payload):
         set_vote(message.from_user, poll_key, option_text=message.text, reply=message.message_id)
         return
 
-    command, question = get_command_and_text(message.get('text', ''))
+    command, question = get_command_and_text(message.text or '')
     create_poll(message, question)
 
 def handle_cron(cloudwatch_time):
@@ -126,8 +126,9 @@ def telegram2json(telegram_object):
     return json.loads(telegram_object.to_json())
 
 def create_poll(message, question):
-    author = telegram2json(message.from_user)
     poll = Poll()
+    poll.question = question
+    poll.author = telegram2json(message.from_user)
     poll_message = bot.sendMessage(
         message.chat.id,
         poll2text(poll),
@@ -158,6 +159,7 @@ def set_vote(telegram_user, poll_key, option_id=None, option_text=None, reply=No
         assert option_id
 
     # Add user if it doesn't exist yet.
+    db_user = telegram2json(telegram_user)
     poll.update(
         actions=[Poll.users[telegram_user.user_id].set(db_user)],
         condition=[~Poll.users[telegram_user.user_id].exists()]
@@ -224,7 +226,7 @@ def poll2text(poll):
     msg = []
     msg.append("<em>%s</em>" % poll.question)
     msg.append("")
-    total = len(poll.votes)
+    total = len([v for v in poll.votes])
 
     users_by_option_id = poll.get_users_by_option_id()
 
@@ -294,14 +296,14 @@ class Poll(Model):
     question = UnicodeAttribute
     author = JSONAttribute()
     # option_id is index of the option in the list
-    options = ListAttribute()
-    votes = MapAttribute()  # user_id -> option_id
-    users = MapAttribute()   # user_id -> data
+    options = ListAttribute(default=[])
+    votes = MapAttribute(default={})  # user_id -> option_id
+    users = MapAttribute(default={})   # user_id -> data
     # see https://pynamodb.readthedocs.io/en/latest/optimistic_locking.html
     version = VersionAttribute()
     # information about poll message in telegram
     telegram_version = NumberAttribute()
-    telegram_datetime = UnicodeDatetimeAttribute()
+    telegram_datetime = UTCDateTimeAttribute()
 
     def get_users_by_option_id(self):
         users_by_option_id = {}
