@@ -31,9 +31,9 @@ if LOG_LEVEL:
     logger.error("LOG_LEVEL: %s", LOG_LEVEL)
 
 DYNAMO_DB_TABLE_NAME = os.getenv("DYNAMO_DB_TABLE_NAME", "opinions-bot")
-ADD_YOU_OPINION_MESSAGE="""To add your answer, reply to the original message with the question.
+ADD_YOU_OPINION_MESSAGE="""To add your answer, reply to the bot message (the one with buttons).
 
-<em>Replying to forwarded message will not affect. Moreover, forwarded message with the questions and answers are frozen forever. You can forward the message for fix current answers<em>"""
+<em>Replying to forwarded message will not affect. Moreover, forwarded message with question and answers are frozen forever. You can forward the message to fix current answers</em>"""
 
 UPDATING_POLL_MESSAGE_DELAY = 1 # seconds
 MAX_INLINE_OPTIONS=30
@@ -146,10 +146,13 @@ def set_vote(telegram_user, poll_key, option_id=None, option_text=None, reply=No
 
     if option_text:
         # add option if it doesn't exist yet
-        poll.update(
-            actions=[Poll.options.append(option_text)],
-            condition=~Poll.opinions.contains(option_text)
-        )
+        with CheckCondition():
+            poll.update(
+                actions=[Poll.options.set(
+                    Poll.options.append([option_text])
+                )],
+                condition=~Poll.options.contains(option_text)
+            )
         # compute option_id
         for option_id, text in enumerate(poll.options):
             if text == option_text:
@@ -160,14 +163,15 @@ def set_vote(telegram_user, poll_key, option_id=None, option_text=None, reply=No
 
     # Add user if it doesn't exist yet.
     db_user = telegram2json(telegram_user)
-    poll.update(
-        actions=[Poll.users[telegram_user.user_id].set(db_user)],
-        condition=[~Poll.users[telegram_user.user_id].exists()]
-    )
+    with CheckCondition():
+        poll.update(
+            actions=[Poll.users[telegram_user.id].set(db_user)],
+            condition=~Poll.users[telegram_user.id].exists()
+        )
 
     # Update vote
     poll.update(
-        actions=[Poll.votes[telegram_user.user_id].set(option_id)],
+        actions=[Poll.votes[telegram_user.id].set(option_id)],
     )
 
     try:
@@ -175,7 +179,7 @@ def set_vote(telegram_user, poll_key, option_id=None, option_text=None, reply=No
     except DynamoDBLockError as e:
         # Ignore ACQUIRE_TIMEOUT. It most cases it means that we got big queue
         # of workers and can simply kill most of them. For example, we got 100
-        # votes in a second, then few of them will get to lock, one of them
+        # votes in a second, then few of them will get the lock, one of them
         # will update poll-message, while the rest have nothing to do.
         logger.debug("DynamoDBLockError: %s", e.code)
         if e.code != DynamoDBLockError.ACQUIRE_TIMEOUT:
@@ -236,6 +240,7 @@ def poll2text(poll):
             continue
         users_links = [user2link(u) for u in users]
         msg.append("* %.1f%% %s — %s" % (100.0 * len(users/total), option_text, ', '.join(users_links)))
+    logger.debug("poll2text: %s", msg)
     return "\n".join(msg)
 
 def poll2markup(poll):
@@ -264,26 +269,20 @@ def poll2markup(poll):
         i += 1
         if i > MAX_INLINE_OPTIONS:
             break
-
-    new_vote_button = InlineKeyboardButton(
-        "<em>Add your vote</em>",
-        callback_data="another_vote"
-    )
-    buttons.append(new_vote_button)
     return InlineKeyboardMarkup.from_column(buttons)
 
 
-class User(MapAttribute):
-    user_id = NumberAttribute()
-    data = JSONAttribute()
+#class User(MapAttribute):
+#    user_id = NumberAttribute()
+#    data = JSONAttribute()
 
 #class Option(MapAttribute):
 #    option_id = NumberAttribute()
 #    text = UnicodeAttribute()
 
-class Vote(MapAttribute):
-    user_id = NumberAttribute()
-    option_id = NumberAttribute()
+#class Vote(MapAttribute):
+#    user_id = NumberAttribute()
+#    option_id = NumberAttribute()
 
 class Poll(Model):
     """
@@ -296,9 +295,9 @@ class Poll(Model):
     question = UnicodeAttribute
     author = JSONAttribute()
     # option_id is index of the option in the list
-    options = ListAttribute(default=[])
-    votes = MapAttribute(default={})  # user_id -> option_id
-    users = MapAttribute(default={})   # user_id -> data
+    options = ListAttribute(default=list)
+    votes = MapAttribute(default=dict)  # user_id -> option_id
+    users = MapAttribute(default=dict)   # user_id -> data
     # see https://pynamodb.readthedocs.io/en/latest/optimistic_locking.html
     version = VersionAttribute()
     # information about poll message in telegram
@@ -307,7 +306,9 @@ class Poll(Model):
 
     def get_users_by_option_id(self):
         users_by_option_id = {}
-        for user_id, option_id in self.votes.items():
+        #for user_id, option_id in self.votes.items():
+        for wtf in self.votes:
+            logger.debug("WTF %s", wtf)
             users_by_option_id.setdefault(option_id, [])
             users_by_option_id[option_id].append(self.users[user_id])
         return users_by_option_id
@@ -350,6 +351,21 @@ class CreateTableIfNotExists():
             return True
         elif exc_value and exc_value.response['Error']['Code'] == "ResourceInUseException":
             # table exists
+            return True
+        else:
+            # reraise error
+            return False
+
+class CheckCondition():
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        if not exc_type:
+            # no exceptions
+            return True
+        elif exc_value and exc_value.cause.response['Error']['Code'] == "ConditionalCheckFailedException":
+            # Condition evalues to False. That's ok for us
             return True
         else:
             # reraise error
