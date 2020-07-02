@@ -14,6 +14,7 @@ from python_dynamodb_lock.python_dynamodb_lock import DynamoDBLockClient, Dynamo
 
 # https://github.com/python-telegram-bot/python-telegram-bot
 from telegram import Update, Bot, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
+import telegram
 
 bot = Bot(token=os.getenv('TELEGRAM_TOKEN'))
 
@@ -99,6 +100,7 @@ def handle_cron(cloudwatch_time):
     # This is a placeholder for cron features, e.g. close poll at some point
 
 def handle_callback_query(callback_query):
+    user = callback_query.from_user
     data = callback_query.data
     message = callback_query.message
     if not (data and message):
@@ -113,7 +115,7 @@ def handle_callback_query(callback_query):
         )
         return
     if data[0] == "vote":
-        set_vote(message.from_user, message2poll_key(message), option_id=int(data[1]))
+        set_vote(user, message2poll_key(message), option_id=int(data[1]))
 
 def message2poll_key(message):
     return "%s:%s" % (message.chat.id, message.message_id)
@@ -143,7 +145,7 @@ def create_poll(message, question):
 
 def set_vote(telegram_user, poll_key, option_id=None, option_text=None, reply=None):
     poll = Poll.get(poll_key)
-
+    user_id = str(telegram_user.id)
     if option_text:
         # add option if it doesn't exist yet
         with CheckCondition():
@@ -159,19 +161,27 @@ def set_vote(telegram_user, poll_key, option_id=None, option_text=None, reply=No
                 break
 
     else:
-        assert option_id
+        assert option_id is not None
+
+    try:
+        if poll.votes[user_id] == option_id:
+            logger.debug("Vote is not changed")
+            return
+    except AttributeError:
+        # no vote yet
+        pass
 
     # Add user if it doesn't exist yet.
     db_user = telegram2json(telegram_user)
     with CheckCondition():
         poll.update(
-            actions=[Poll.users[telegram_user.id].set(db_user)],
-            condition=~Poll.users[telegram_user.id].exists()
+            actions=[Poll.users[user_id].set(db_user)],
+            condition=~Poll.users[user_id].exists()
         )
 
     # Update vote
     poll.update(
-        actions=[Poll.votes[telegram_user.id].set(option_id)],
+        actions=[Poll.votes[user_id].set(option_id)],
     )
 
     try:
@@ -215,12 +225,16 @@ def update_poll_message(poll):
 
         chat_id, message_id = poll2chat_message_ids(poll)
         # Update text
-        bot.editMessageText(
-            poll2text(poll),
-            chat_id,
-            message_id,
-            parse_mode='HTML',
-        )
+        try:
+            bot.editMessageText(
+                poll2text(poll),
+                chat_id,
+                message_id,
+                parse_mode='HTML',
+            )
+        except telegram.error.BadRequest as e:
+            if e.message != "Message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message":
+                raise
 
         # Update Markup
         bot.editMessageReplyMarkup(
@@ -245,17 +259,19 @@ def poll2text(poll):
         if not users:
             continue
         users_links = [user2link(u) for u in users]
-        msg.append("* %.1f%% %s — %s" % (100.0 * len(users)/total, option_text, ', '.join(users_links)))
+        msg.append("* %s — %s <b>%.1f%%</b>" % (
+            option_text,
+            ', '.join(users_links),
+            100.0 * len(users)/total,
+        ))
     logger.debug("poll2text: %s", msg)
     return "\n".join(msg)
 
 def poll2markup(poll):
     buttons = []
 
-    opt_by_id = dict(
-        (opt.option_id, opt)
-        for opt in poll.options
-    )
+    opt_by_id = dict(enumerate(poll.options))
+
     opt_users = sorted(
         poll.get_users_by_option_id().items(),
         key=lambda item: len(item[1]),
@@ -264,12 +280,12 @@ def poll2markup(poll):
     i = 0
     for option_id, users in opt_users:
         # make buttons for options with votes
-        opt = opt_by_id[vote.option_id]
+        opt = opt_by_id[option_id]
         buttons.append(InlineKeyboardButton(
-            opt.text,
+            opt,
             callback_data=",".join([
                 "vote",
-                opt.option_id
+                str(option_id)
             ])
         ))
         i += 1
