@@ -24,34 +24,34 @@ The bot works in groups only.
 
 * Once a user replies to the question-message, the question-message is updated and new buttons are added. For example, after few replies the question-message may look like following::
 
-  What do you think?
+      What do you think?
 
-  * 33% It's good -- @user1
-  * 33% Fine for me -- @user2
-  * 33% Super! -- @user3
+      * 33% It's good -- @user1
+      * 33% Fine for me -- @user2
+      * 33% Super! -- @user3
 
-  3 Opinions
+      3 Opinions
 
-  [ It's good ]
-  [ Fine for me ]
-  [ Super! ]
+      [ It's good ]
+      [ Fine for me ]
+      [ Super! ]
 
 * Now other users can use buttons to express their opions or send send a new answer in the same way. Example::
 
 
   What do you think?
 
-  * 30% It's good -- @user1, @user5, @user6
-  * 20% Fine for me -- @user2, @user9
-  * 40% Super! -- @user3, @user7, @user8, @user10
-  * 10% It's not just good, it's awersome!!! -- @user4
+      * 30% It's good -- @user1, @user5, @user6
+      * 20% Fine for me -- @user2, @user9
+      * 40% Super! -- @user3, @user7, @user8, @user10
+      * 10% It's not just good, it's awersome!!! -- @user4
 
-  10 Opinions
+      10 Opinions
 
-  [ It's good ]
-  [ Fine for me ]
-  [ Super! ]
-  [ It's not just good, it's awersome!!! ]
+      [ It's good ]
+      [ Fine for me ]
+      [ Super! ]
+      [ It's not just good, it's awersome!!! ]
 
 
 * If user replies to a forwarded bot message, the bot will respond with the comment that explains how to use the bot.
