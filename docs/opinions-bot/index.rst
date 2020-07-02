@@ -80,7 +80,7 @@ Create a bot
 
 https://telegram.me/botfather -- follow instruction to set bot name and get bot token
 
-You may need to activate [privacy mode](https://core.telegram.org/bots#privacy-mode) to allow bot to send hints, when user tries to reply to forwarded message.
+You may need to activate `privacy mode <https://core.telegram.org/bots#privacy-mode>`__ to allow bot to send hints, when user tries to reply to forwarded message.
 
 Prepare zip file
 ----------------
