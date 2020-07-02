@@ -5,12 +5,12 @@ import logging
 import os
 import re
 import boto3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import time
 
 from pynamodb.models import Model
 from pynamodb.attributes import MapAttribute, ListAttribute, NumberAttribute, VersionAttribute, UTCDateTimeAttribute, JSONAttribute, UnicodeAttribute
-from python_dynamodb_lock.python_dynamodb_lock import DynamoDBLockClient
+from python_dynamodb_lock.python_dynamodb_lock import DynamoDBLockClient, DynamoDBLockError
 
 # https://github.com/python-telegram-bot/python-telegram-bot
 from telegram import Update, Bot, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
@@ -137,7 +137,7 @@ def create_poll(message, question):
         reply_to_message_id=message.message_id
     )
     poll.key = message2poll_key(poll_message)
-    poll.telegram_datetime = datetime.now()
+    poll.telegram_datetime = get_now()
     poll.telegram_version = 1
     poll.save()
 
@@ -195,6 +195,7 @@ def update_poll_message(poll):
             DYNAMO_DB_TABLE_NAME + ":" + poll.key,
             retry_period=timedelta(seconds=UPDATING_POLL_MESSAGE_DELAY/3),
             retry_timeout=timedelta(seconds=UPDATING_POLL_MESSAGE_DELAY*5),
+            raise_context_exception=True,
     ):
         poll.refresh()
 
@@ -203,19 +204,24 @@ def update_poll_message(poll):
             logger.debug("Poll was already updated. Exit")
             return
 
-        since_last_update = (datetime.now() - poll.telegram_datetime).total_seconds()
+        now = get_now()
+        logger.debug("Checking for sleep: now is %s, last update is %s", now, poll.telegram_datetime)
+        since_last_update = (now - poll.telegram_datetime).total_seconds()
         if since_last_update < UPDATING_POLL_MESSAGE_DELAY:
-            time.sleep(UPDATING_POLL_MESSAGE_DELAY - since_last_update)
+            sleep = UPDATING_POLL_MESSAGE_DELAY - since_last_update
+            logger.debug("Sleep for %ssec", poll)
+            time.sleep(sleep)
             poll.refresh()
 
         chat_id, message_id = poll2chat_message_ids(poll)
         # Update text
         bot.editMessageText(
+            poll2text(poll),
             chat_id,
             message_id,
-            text=poll2text(poll),
             parse_mode='HTML',
         )
+
         # Update Markup
         bot.editMessageReplyMarkup(
             chat_id,
@@ -223,7 +229,7 @@ def update_poll_message(poll):
             reply_markup=poll2markup(poll),
         )
         poll.telegram_version = poll.version + 1
-        poll.telegram_datetime = datetime.now()
+        poll.telegram_datetime = get_now()
         poll.save()
 
 def poll2text(poll):
@@ -239,7 +245,7 @@ def poll2text(poll):
         if not users:
             continue
         users_links = [user2link(u) for u in users]
-        msg.append("* %.1f%% %s — %s" % (100.0 * len(users/total), option_text, ', '.join(users_links)))
+        msg.append("* %.1f%% %s — %s" % (100.0 * len(users)/total, option_text, ', '.join(users_links)))
     logger.debug("poll2text: %s", msg)
     return "\n".join(msg)
 
@@ -292,7 +298,7 @@ class Poll(Model):
         table_name = DYNAMO_DB_TABLE_NAME
     key = UnicodeAttribute(hash_key=True)
 
-    question = UnicodeAttribute
+    question = UnicodeAttribute()
     author = JSONAttribute()
     # option_id is index of the option in the list
     options = ListAttribute(default=list)
@@ -306,9 +312,8 @@ class Poll(Model):
 
     def get_users_by_option_id(self):
         users_by_option_id = {}
-        #for user_id, option_id in self.votes.items():
-        for wtf in self.votes:
-            logger.debug("WTF %s", wtf)
+        for user_id in self.votes:
+            option_id = self.votes[user_id]
             users_by_option_id.setdefault(option_id, [])
             users_by_option_id[option_id].append(self.users[user_id])
         return users_by_option_id
@@ -324,14 +329,13 @@ def get_command_and_text(text):
         return None, text
 
 def user2link(user):
-    user_id = user.user_id
+    user_id = user["id"]
     name = user2name(user)
     user_link = '<a href="tg://user?id=%s">%s</a>' % (user_id, name)
     return user_link
 
 
 def user2name(user):
-    user = user.data
     if user.get('username'):
         return '@%s' % (user.get('username'))
 
@@ -370,3 +374,6 @@ class CheckCondition():
         else:
             # reraise error
             return False
+
+def get_now():
+    return datetime.now(timezone.utc)
