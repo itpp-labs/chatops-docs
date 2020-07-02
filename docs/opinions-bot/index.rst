@@ -38,8 +38,7 @@ The bot works in groups only.
 
 * Now other users can use buttons to express their opions or send send a new answer in the same way. Example::
 
-
-  What do you think?
+      What do you think?
 
       * 30% It's good -- @user1, @user5, @user6
       * 20% Fine for me -- @user2, @user9
@@ -80,7 +79,7 @@ Create a bot
 
 https://telegram.me/botfather -- follow instruction to set bot name and get bot token
 
-You may need to activate `privacy mode <https://core.telegram.org/bots#privacy-mode>`__ to allow bot to send hints, when user tries to reply to forwarded message.
+You may need to disable `privacy mode <https://core.telegram.org/bots#privacy-mode>`__ to allow bot to send hints, when user tries to reply to forwarded message.
 
 Prepare zip file
 ----------------
