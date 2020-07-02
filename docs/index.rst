@@ -12,3 +12,4 @@ ChatOps
    todo-bot/index
    resend-bot/index
    ifttt-to-telegram/index
+   opinions-bot/index
