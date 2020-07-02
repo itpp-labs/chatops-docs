@@ -17,6 +17,7 @@ from telegram import Update, Bot, InlineKeyboardMarkup, InlineKeyboardButton, Re
 import telegram
 
 bot = Bot(token=os.getenv('TELEGRAM_TOKEN'))
+BOT_ID = int(os.getenv('TELEGRAM_TOKEN').split(":")[0])
 
 logger = logging.getLogger("opinions-bot")
 LOG_LEVEL = os.getenv("LOG_LEVEL")
@@ -32,9 +33,11 @@ if LOG_LEVEL:
     logger.error("LOG_LEVEL: %s", LOG_LEVEL)
 
 DYNAMO_DB_TABLE_NAME = os.getenv("DYNAMO_DB_TABLE_NAME", "opinions-bot")
-ADD_YOU_OPINION_MESSAGE="""To add your answer, reply to the bot message (the one with buttons).
+ON_RESPONSE_TO_FORWARDED_MESSAGE="""To add your answer, reply to the original bot message, not the forwarded one.
 
-<em>Replying to forwarded message will not affect. Moreover, forwarded message with question and answers are frozen forever. You can forward the message to fix current answers</em>"""
+Forwarded message with question and answers are frozen forever. You can forward the message to fix current answers"""
+
+NO_VOTES_YET="""To add your vote, please reply to this message"""
 
 UPDATING_POLL_MESSAGE_DELAY = 1 # seconds
 MAX_INLINE_OPTIONS=30
@@ -86,12 +89,33 @@ def handle_telegram(telegram_payload):
             ddb_client = boto3.client('dynamodb')
             DynamoDBLockClient.create_dynamodb_table(ddb_client)
 
-    if message.reply_to_message:
-        poll_key = message2poll_key(message.reply_to_message)
-        set_vote(message.from_user, poll_key, option_text=message.text, reply=message.message_id)
+    poll_message = message.reply_to_message
+    if poll_message:
+        if poll_message.forward_from and poll_message.forward_from.id == BOT_ID:
+            # This may happen only is bot has access to all message.
+            # Reply to forwarded message, rather than original one.
+            bot.sendMessage(
+                message.chat.id,
+                "<em>%s</em>" % ON_RESPONSE_TO_FORWARDED_MESSAGE,
+                parse_mode='HTML',
+                reply_to_message_id=message.message_id
+            )
+        elif  poll_message.from_user.id != BOT_ID:
+            # Reply to third-party message.
+            # Ignore.
+            logger.debug("Reply to third-party message: %s", [BOT_ID, poll_message.from_user.id])
+        else:
+            poll_key = message2poll_key(poll_message)
+            set_vote(message.from_user, poll_key, option_text=message.text, reply=message.message_id)
         return
 
     command, question = get_command_and_text(message.text or '')
+    if not command:
+        logger.debug("Message without command")
+        return
+    if not question:
+        logger.debug("Message without text")
+        return
     create_poll(message, question)
 
 def handle_cron(cloudwatch_time):
@@ -106,14 +130,6 @@ def handle_callback_query(callback_query):
     if not (data and message):
         return
     data = data.split(",")
-    if data[0] == "another_vote":
-        bot.sendMessage(
-            message.chat.id,
-            ADD_YOU_OPINION_MESSAGE,
-            parse_mode='HTML',
-            reply_to_message_id=message.message_id
-        )
-        return
     if data[0] == "vote":
         set_vote(user, message2poll_key(message), option_id=int(data[1]))
 
@@ -167,7 +183,7 @@ def set_vote(telegram_user, poll_key, option_id=None, option_text=None, reply=No
         if poll.votes[user_id] == option_id:
             logger.debug("Vote is not changed")
             return
-    except AttributeError:
+    except KeyError:
         # no vote yet
         pass
 
@@ -254,16 +270,20 @@ def poll2text(poll):
 
     users_by_option_id = poll.get_users_by_option_id()
 
+    has_votes = False
     for option_id, option_text in enumerate(poll.options):
         users = users_by_option_id.get(option_id)
         if not users:
             continue
+        has_votes = True
         users_links = [user2link(u) for u in users]
         msg.append("* %s — %s <b>%.1f%%</b>" % (
             option_text,
             ', '.join(users_links),
             100.0 * len(users)/total,
         ))
+    if not has_votes:
+        msg.append("<em>%s</em>" % NO_VOTES_YET)
     logger.debug("poll2text: %s", msg)
     return "\n".join(msg)
 

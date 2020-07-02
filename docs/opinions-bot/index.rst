@@ -20,7 +20,7 @@ The bot works in groups only.
 
   What do you think?
 
-  *no opinions yet*
+  *no votes yet*
 
 * Once a user replies to the question-message, the question-message is updated and new buttons are added. For example, after few replies the question-message may look like following::
 
@@ -35,7 +35,6 @@ The bot works in groups only.
   [ It's good ]
   [ Fine for me ]
   [ Super! ]
-  [ *Add your answer* ]
 
 * Now other users can use buttons to express their opions or send send a new answer in the same way. Example::
 
@@ -53,7 +52,6 @@ The bot works in groups only.
   [ Fine for me ]
   [ Super! ]
   [ It's not just good, it's awersome!!! ]
-  [ *Add your opinions* ]
 
 
 * If user replies to a forwarded bot message, the bot will respond with the comment that explains how to use the bot.
@@ -82,6 +80,8 @@ Create a bot
 
 https://telegram.me/botfather -- follow instruction to set bot name and get bot token
 
+You may need to activate [privacy mode](https://core.telegram.org/bots#privacy-mode) to allow bot to send hints, when user tries to reply to forwarded message.
+
 Prepare zip file
 ----------------
 
@@ -91,9 +91,13 @@ To make a `deployment package <https://docs.aws.amazon.com/lambda/latest/dg/lamb
     cd /tmp/bot
 
     pip3 install python-telegram-bot pynamodb python_dynamodb_lock --system -t .
+    pip3 install git+https://github.com/whatnick/python_dynamodb_lock.git@90022293bd5afd353aeb309288a75e099cb63779 -t .
     wget https://raw.githubusercontent.com/itpp-labs/chatops-docs/master/tools/opinions-bot/lambda_function.py -O lambda_function.py
-    # delete built-in or unused dependencies
-    rm -rf tornado* docutils*
+    # delete cache files
+    find . -iname __pycache__ | xargs rm -rf
+    # delete built-in or unused dependencies and files
+    rm -rf tornado* docutils* boto* six* s3transfer* dateutil* jmespath* urllib3*
+    rm cryptography/hazmat/bindings/_openssl.abi3.so
     zip -r /tmp/bot.zip *
 
 Create Lambda function
@@ -121,12 +125,6 @@ In *AWS: IAM service: Policies*
   * *Action* -- ``All DynamoDB actions``
   * *Resources* -- ``All Resources``
 
-* Create policy of actions for EC2:
-  
-  * *Service* -- ``EC2``
-  * *Action* -- ``All EC2 actions``
-  * *Resources* -- ``All Resources``
-
 In *AWS: IAM service: Roles*
 
 * Open role attached to the lambda function
@@ -135,8 +133,8 @@ In *AWS: IAM service: Roles*
 Function code
 ~~~~~~~~~~~~~
 
-* ``Code entry type``: *Upload a .zip file*
-* Upload ``bot.zip``
+* Use ``Actions > Upload a .zip file``
+* Choose ``bot.zip``
 
 Trigger
 ~~~~~~~
