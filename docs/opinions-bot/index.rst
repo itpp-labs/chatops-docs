@@ -69,7 +69,7 @@ On creating AWS Lambda, you would need to set following Environment variables:
 Bot source
 ==========
 
-See https://github.com/itpp-labs/chatops-docs/blob/master/tools/opinions-bot/lambda_function.py
+See https://github.com/itpp-labs/chatops-docs/blob/master/opinions-bot/lambda_function.py
 
 Deployment
 ==========
