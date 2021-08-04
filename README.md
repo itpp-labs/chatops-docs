@@ -10,8 +10,8 @@ Source of https://itpp.dev/chat/ docs
 * Clone to your machine
 * Install dependencies:
 
-      sudo pip install sphinx sphinx-autobuild
-      sudo pip install sphinx_rtd_theme
+      python3 -m pip install sphinx sphinx-autobuild
+      python3 -m pip install sphinx_rtd_theme
 
 ## Contribution
 
