@@ -152,6 +152,8 @@ def lambda_handler(event, context):
     if 'entities' in message is not None:
         main_text = get_formatted_text(main_text,message['entities'])
 
+    if not main_text:
+        main_text = message.get('caption')
 
     reply_text = "%s%s\n%s\n<i>msg:%s%s</i>" % (
         from_group or '',
